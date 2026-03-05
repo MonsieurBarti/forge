@@ -64,13 +64,13 @@ async function main() {
       // Common locations relative to cwd
       path.join(process.cwd(), 'package.json'),
       // The forge source dir if it exists
-      path.join(os.homedir(), 'gt', 'get_shit_done_beads', 'package.json'),
+      path.join(os.homedir(), 'gt', 'forge', 'package.json'),
     ];
 
     for (const candidate of candidates) {
       try {
         const pkg = JSON.parse(fs.readFileSync(candidate, 'utf8'));
-        if (pkg.name === 'forge-cc') {
+        if (pkg.name === 'forge') {
           sourceVersion = pkg.version;
           break;
         }

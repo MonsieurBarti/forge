@@ -143,7 +143,7 @@ function registerHooks() {
 
 function main() {
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
-    console.log('Forge - GSD-style project orchestration for Claude Code');
+    console.log('Forge - Project orchestration for Claude Code');
     console.log('');
     console.log('Usage: node install.js');
     console.log('');

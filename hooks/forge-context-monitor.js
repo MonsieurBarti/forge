@@ -6,7 +6,7 @@
  * Runs on PostToolUse. Monitors context window usage and injects warnings
  * when it gets low, suggesting to /clear and use /forge:resume.
  *
- * Based on GSD's gsd-context-monitor.js pattern.
+ * Based on the context-monitor pattern.
  */
 
 const fs = require('fs');

@@ -1,6 +1,6 @@
 # Forge
 
-GSD-style project orchestration for Claude Code, backed by [beads](https://github.com/steveyegge/beads).
+Project orchestration for Claude Code, backed by [beads](https://github.com/steveyegge/beads).
 
 Instead of managing state through markdown planning files, Forge uses beads as its data layer -- epics for milestones, dependency graphs for phase ordering, and bead metadata for plans, requirements, and verification.
 
@@ -15,22 +15,22 @@ Instead of managing state through markdown planning files, Forge uses beads as i
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew tap MonsieurBarti/get-shit-done-beads
-brew install forge-cc
-node "$(brew --prefix)/libexec/install.js"
+brew tap MonsieurBarti/forge
+brew install forge
+node "$(brew --prefix forge)/libexec/install.js"
 ```
 
 ### npm (any platform)
 
 ```bash
-npx forge-cc
+npx forge
 ```
 
 ### Manual
 
 ```bash
-git clone https://github.com/MonsieurBarti/get-shit-done-beads.git
-cd get-shit-done-beads
+git clone https://github.com/MonsieurBarti/forge.git
+cd forge
 node install.js
 ```
 
@@ -63,7 +63,7 @@ All commands are available as Claude Code slash commands:
 
 ## How It Works
 
-Forge maps GSD concepts to beads:
+Forge maps project management concepts to beads:
 
 | Concept | Bead Representation |
 |---------|-------------------|

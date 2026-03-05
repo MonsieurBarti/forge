@@ -1,10 +1,10 @@
 {
-  "name": "forge-cc",
+  "name": "forge",
   "version": "0.1.0",
-  "description": "GSD-style project orchestration for Claude Code, backed by beads",
+  "description": "Project orchestration for Claude Code, backed by beads",
   "type": "commonjs",
   "bin": {
-    "forge-cc": "install.js"
+    "forge": "install.js"
   },
   "scripts": {
     "install-plugin": "node install.js",

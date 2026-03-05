@@ -29,7 +29,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           mkdir -p dist
-          tar czf "dist/forge-cc-${TAG}.tar.gz" \
+          tar czf "dist/forge-${TAG}.tar.gz" \
             --exclude='.git' \
             --exclude='.github' \
             --exclude='.beads' \
@@ -45,7 +45,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          SHA=$(shasum -a 256 "dist/forge-cc-${TAG}.tar.gz" | awk '{print $1}')
+          SHA=$(shasum -a 256 "dist/forge-${TAG}.tar.gz" | awk '{print $1}')
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
           echo "SHA256: $SHA"
 
@@ -53,7 +53,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/forge-cc-*.tar.gz
+          files: dist/forge-*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -67,9 +67,9 @@ jobs:
           URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
 
           mkdir -p Formula
-          cat > Formula/forge-cc.rb <<RUBY
-          class ForgeCc < Formula
-            desc "GSD-style project orchestration for Claude Code, backed by beads"
+          cat > Formula/forge.rb <<RUBY
+          class Forge < Formula
+            desc "Project orchestration for Claude Code, backed by beads"
             homepage "https://github.com/${REPO}"
             url "${URL}"
             sha256 "${SHA}"
@@ -97,6 +97,6 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/forge-cc.rb
-          git diff --cached --quiet || git commit -m "brew: update forge-cc to ${TAG}"
+          git add Formula/forge.rb
+          git diff --cached --quiet || git commit -m "brew: update forge to ${TAG}"
           git push origin HEAD:main || true
