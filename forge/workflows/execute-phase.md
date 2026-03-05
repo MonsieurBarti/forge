@@ -17,12 +17,21 @@ Verify phase is `in_progress` (has been planned). If not planned, suggest `/forg
 
 ## 2. Detect Waves
 
-Group tasks by dependency wave:
-- **Wave 1**: Tasks with no intra-phase blockers (all dependencies are outside the phase or closed)
-- **Wave 2**: Tasks that depend only on Wave 1 tasks
-- **Wave N**: Tasks that depend only on Wave 1..N-1 tasks
+Use the detect-waves tool to automatically group tasks by dependency order:
 
-If all tasks are independent, there's a single wave.
+```bash
+WAVES=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" detect-waves <phase-id>)
+```
+
+This returns a JSON structure with:
+- `waves`: array of wave objects, each containing `tasks_to_execute` and `tasks_already_done`
+- `summary`: counts of open/in_progress/closed tasks
+
+If `summary.tasks_open` is 0 and `summary.tasks_closed` equals `summary.total_tasks`,
+the phase is already complete — skip to step 4.
+
+If the output contains `circular_or_external_dependency`, report the cycle and ask the user
+how to proceed.
 
 ## 3. Execute Waves
 
@@ -30,10 +39,12 @@ For each wave, in order:
 
 ### Wave N Execution
 
+Skip waves where `tasks_to_execute` is empty (all tasks already done).
+
 For tasks in this wave that are `open` or `in_progress`:
 
-If multiple independent tasks exist in the wave, execute them in **parallel** by spawning
-multiple forge-executor agents simultaneously:
+**Multiple independent tasks** — execute in **parallel** by spawning multiple forge-executor
+agents simultaneously in the same response:
 
 ```
 Agent(subagent_type="forge-executor", prompt="
@@ -59,7 +70,8 @@ If you encounter a blocker:
 ")
 ```
 
-If only one task, execute it directly without spawning an agent (saves context overhead).
+**Single task** — execute it directly without spawning an agent (saves context overhead).
+Follow the same steps: claim, implement, verify, commit, close.
 
 ### Wait for Wave Completion
 
@@ -68,7 +80,12 @@ After all agents in a wave complete, check results:
 PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 ```
 
-If any tasks are still open (failed or blocked), report them before proceeding to the next wave.
+Review the updated task statuses:
+- If all wave tasks closed successfully, proceed to the next wave
+- If any task is still open or marked BLOCKED, report the status and decide:
+  - Skip and continue to next wave (if non-blocking)
+  - Fix the issue inline (if quick)
+  - Stop execution and report (if the blocker affects downstream waves)
 
 ## 4. Phase Completion Check
 
