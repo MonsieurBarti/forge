@@ -283,6 +283,116 @@ const commands = {
   },
 
   /**
+   * Detect dependency waves for phase execution.
+   * Groups tasks into waves based on intra-phase blocking dependencies.
+   * Wave 1: tasks with no intra-phase blockers
+   * Wave 2: tasks that only depend on wave 1 tasks
+   * Wave N: tasks that only depend on wave 1..N-1 tasks
+   */
+  'detect-waves'(args) {
+    const phaseId = args[0];
+    if (!phaseId) {
+      console.error('Usage: forge-tools detect-waves <phase-bead-id>');
+      process.exit(1);
+    }
+
+    const phase = bdJson(`show ${phaseId}`);
+    const children = bdJson(`children ${phaseId}`);
+    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+
+    if (tasks.length === 0) {
+      output({ phase_id: phaseId, waves: [], summary: { total_tasks: 0, total_waves: 0 } });
+      return;
+    }
+
+    // Build set of task IDs in this phase
+    const phaseTaskIds = new Set(tasks.map(t => t.id));
+
+    // For each task, find its intra-phase blocking dependencies
+    const taskDeps = {};
+    for (const task of tasks) {
+      const depsRaw = bd(`dep list ${task.id} --type blocks --json`, { allowFail: true });
+      let deps = [];
+      if (depsRaw) {
+        try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+      }
+      if (!Array.isArray(deps)) deps = [];
+      // Only keep dependencies that are within this phase and still open
+      const intraPhaseDeps = deps
+        .filter(d => phaseTaskIds.has(d.id || d.dependency_id || d))
+        .map(d => d.id || d.dependency_id || d)
+        .filter(id => {
+          const depTask = tasks.find(t => t.id === id);
+          return depTask && depTask.status !== 'closed';
+        });
+      taskDeps[task.id] = intraPhaseDeps;
+    }
+
+    // Topological wave assignment
+    const waves = [];
+    const assigned = new Set();
+
+    while (assigned.size < tasks.length) {
+      const wave = [];
+      for (const task of tasks) {
+        if (assigned.has(task.id)) continue;
+        const unmetDeps = (taskDeps[task.id] || []).filter(d => !assigned.has(d));
+        if (unmetDeps.length === 0) {
+          wave.push(task);
+        }
+      }
+
+      if (wave.length === 0) {
+        // Circular dependency or all remaining tasks are blocked
+        const remaining = tasks.filter(t => !assigned.has(t.id));
+        waves.push({
+          wave_number: waves.length + 1,
+          tasks: remaining.map(t => ({
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            blocked_by: taskDeps[t.id] || [],
+          })),
+          note: 'circular_or_external_dependency',
+        });
+        break;
+      }
+
+      waves.push({
+        wave_number: waves.length + 1,
+        tasks: wave.map(t => ({
+          id: t.id,
+          title: t.title,
+          status: t.status,
+        })),
+      });
+
+      for (const t of wave) assigned.add(t.id);
+    }
+
+    // Separate executable vs already-done tasks
+    const executableWaves = waves.map(w => ({
+      ...w,
+      tasks_to_execute: w.tasks.filter(t => t.status === 'open' || t.status === 'in_progress'),
+      tasks_already_done: w.tasks.filter(t => t.status === 'closed'),
+    }));
+
+    output({
+      phase_id: phaseId,
+      phase_title: phase?.title,
+      phase_status: phase?.status,
+      waves: executableWaves,
+      summary: {
+        total_tasks: tasks.length,
+        total_waves: waves.length,
+        tasks_open: tasks.filter(t => t.status === 'open').length,
+        tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
+        tasks_closed: tasks.filter(t => t.status === 'closed').length,
+      },
+    });
+  },
+
+  /**
    * Find the project bead in the current beads database.
    */
   'find-project'() {

@@ -15,4 +15,24 @@ Read the Forge conventions: @~/.claude/forge/references/conventions.md
 
 <execution_context>
 Execute the execute-phase workflow from @~/.claude/forge/workflows/execute-phase.md end-to-end.
+
+When detecting waves (step 2), use forge-tools to automatically group tasks:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" detect-waves <phase-id>
+```
+
+When executing tasks in a wave (step 3), spawn **forge-executor** agents for each task.
+If the wave has multiple independent tasks, spawn them **in parallel** using multiple
+Agent tool calls in the same response. Pass each agent the task ID, description,
+acceptance criteria, and phase context.
+
+If the wave has only one task, execute it directly without spawning an agent
+(saves context overhead).
+
+After each wave completes, verify results with:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>
+```
+
+If any tasks failed or are blocked, report the status before proceeding to the next wave.
 </execution_context>

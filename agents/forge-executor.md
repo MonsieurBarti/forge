@@ -78,3 +78,11 @@ If you encounter something unexpected:
    bd update <task-id> --notes="BLOCKED: <description of blocker>"
    ```
 </deviation_rules>
+
+<parallel_safety>
+When running in parallel with other executor agents:
+- Only modify files relevant to YOUR task
+- If you need to modify a file another task might also touch, keep changes minimal
+- Use specific file staging (`git add <files>`) not `git add .` or `git add -A`
+- If you detect a merge conflict with another agent's work, report it as a blocker
+</parallel_safety>
