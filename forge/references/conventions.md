@@ -11,6 +11,7 @@ This document defines how Forge uses beads to represent project management conce
 | `forge:req` | Feature bead | A project requirement |
 | `forge:task` | Task bead | An executable task within a phase |
 | `forge:research` | Task bead | Research output for a phase |
+| `forge:quick` | Task bead | A quick task (ad-hoc, outside phase roadmap) |
 
 ## Bead Types
 
