@@ -2,3 +2,8 @@ node_modules/
 .DS_Store
 *.log
 .claude/
+.beads/
+
+# Gas Town (added by gt)
+.runtime/
+.logs/
