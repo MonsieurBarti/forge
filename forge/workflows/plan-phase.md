@@ -35,7 +35,14 @@ If blocked, show what's blocking and suggest working on that first.
 
 ## 3. Research
 
-Spawn a **forge-researcher** agent to investigate the implementation approach:
+Check if auto-research is enabled (default: true):
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" config-get auto_research
+```
+
+If `forge.auto_research` is `false`, skip research and go to step 4.
+
+Otherwise, spawn a **forge-researcher** agent to investigate the implementation approach:
 
 ```
 Agent(subagent_type="forge-researcher", prompt="

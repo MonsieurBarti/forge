@@ -112,6 +112,32 @@ function registerHooks() {
     console.log('  Registered PostToolUse hook: forge-context-monitor');
   }
 
+  // SessionStart hook for update check
+  const updateCheckPath = path.join(CLAUDE_DIR, 'hooks', 'forge-update-check.js');
+  if (!settings.hooks.SessionStart) settings.hooks.SessionStart = [];
+
+  const hasUpdateCheck = settings.hooks.SessionStart.some(
+    h => (h.hooks || []).some(hk => hk.command && hk.command.includes('forge-update-check'))
+  );
+  if (!hasUpdateCheck) {
+    settings.hooks.SessionStart.push({
+      hooks: [
+        {
+          type: 'command',
+          command: `node "${updateCheckPath}"`,
+        },
+      ],
+    });
+    console.log('  Registered SessionStart hook: forge-update-check');
+  }
+
+  // Copy package.json into installed forge dir for version comparison
+  const srcPkg = path.join(SRC, 'package.json');
+  const destPkg = path.join(CLAUDE_DIR, 'forge', 'package.json');
+  if (fs.existsSync(srcPkg)) {
+    fs.copyFileSync(srcPkg, destPkg);
+  }
+
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }
 

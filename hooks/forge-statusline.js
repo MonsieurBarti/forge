@@ -32,18 +32,31 @@ async function main() {
       }));
     }
 
-    // Try to get current project status
+    // Try to get current project status with progress
     let status = '';
     try {
-      const result = execFileSync('node', [
-        path.join(os.homedir(), '.claude', 'forge', 'bin', 'forge-tools.cjs'),
-        'find-project',
-      ], { encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
+      const toolsPath = path.join(os.homedir(), '.claude', 'forge', 'bin', 'forge-tools.cjs');
+      const result = execFileSync('node', [toolsPath, 'find-project'], {
+        encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
       const project = JSON.parse(result);
       if (project.found && project.projects && project.projects.length > 0) {
         const p = project.projects[0];
-        status = p.title || 'forge';
+        // Try to get progress summary
+        try {
+          const progressResult = execFileSync('node', [toolsPath, 'progress', p.id], {
+            encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          const progress = JSON.parse(progressResult);
+          const pct = progress.progress?.percent || 0;
+          const phase = progress.current_phase?.title || '';
+          const phaseShort = phase.replace(/^Phase \d+:\s*/, '');
+          status = `${p.title} [${pct}%]`;
+          if (phaseShort) status += ` ${phaseShort}`;
+        } catch {
+          status = p.title || 'forge';
+        }
       }
     } catch {
       // No project found or bd not available

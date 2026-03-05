@@ -12,13 +12,29 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execFileSync } = require('child_process');
 
 const BRIDGE_FILE = path.join(os.tmpdir(), 'forge-context-bridge.json');
-const WARNING_THRESHOLD = 0.35;
-const CRITICAL_THRESHOLD = 0.25;
+const DEFAULT_WARNING_THRESHOLD = 0.35;
+const DEFAULT_CRITICAL_THRESHOLD = 0.25;
 const DEBOUNCE_CALLS = 5;
 
 let callCount = 0;
+let cachedWarning = null;
+let cachedCritical = null;
+
+function getThreshold(key, fallback) {
+  try {
+    const val = execFileSync('bd', ['kv', 'get', key], {
+      encoding: 'utf8', timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const parsed = parseFloat(val);
+    if (!isNaN(parsed) && parsed > 0 && parsed < 1) return parsed;
+  } catch {
+    // Key not set -- use default
+  }
+  return fallback;
+}
 
 async function main() {
   try {
@@ -30,6 +46,12 @@ async function main() {
 
     if (callCount % DEBOUNCE_CALLS !== 0) return;
 
+    // Load configurable thresholds (cache after first load)
+    if (cachedWarning === null) {
+      cachedWarning = getThreshold('forge.context_warning', DEFAULT_WARNING_THRESHOLD);
+      cachedCritical = getThreshold('forge.context_critical', DEFAULT_CRITICAL_THRESHOLD);
+    }
+
     let bridge = {};
     try {
       bridge = JSON.parse(fs.readFileSync(BRIDGE_FILE, 'utf8'));
@@ -40,13 +62,13 @@ async function main() {
     const remaining = bridge.context_remaining;
     if (typeof remaining !== 'number') return;
 
-    if (remaining < CRITICAL_THRESHOLD) {
+    if (remaining < cachedCritical) {
       console.log(JSON.stringify({
         result: 'block',
         reason: `Context window critically low (${Math.round(remaining * 100)}% remaining). ` +
           'Use /forge:pause to save state, then /clear and /forge:resume in a fresh session.'
       }));
-    } else if (remaining < WARNING_THRESHOLD) {
+    } else if (remaining < cachedWarning) {
       // Warning only - don't block
       console.error(
         `[forge] Context at ${Math.round(remaining * 100)}%. Consider /forge:pause soon.`

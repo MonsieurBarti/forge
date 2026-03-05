@@ -32,6 +32,7 @@ cp hooks/* ~/.claude/hooks/
 /forge:execute [phase]  # Execute tasks in a phase
 /forge:verify [phase]   # UAT against acceptance criteria
 /forge:progress         # Status dashboard from bead graph
+/forge:config           # View or modify configuration
 /forge:pause            # Save session context
 /forge:resume           # Restore session context
 ```

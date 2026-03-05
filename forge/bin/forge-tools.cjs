@@ -631,6 +631,79 @@ const commands = {
   },
 
   /**
+   * Get a Forge config value via bd kv.
+   * All Forge config keys are prefixed with "forge.".
+   */
+  'config-get'(args) {
+    const key = args[0];
+    if (!key) {
+      console.error('Usage: forge-tools config-get <key>');
+      process.exit(1);
+    }
+    const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
+    const value = bd(`kv get ${fullKey}`, { allowFail: true });
+    output({ key: fullKey, value: value || null });
+  },
+
+  /**
+   * Set a Forge config value via bd kv.
+   */
+  'config-set'(args) {
+    const key = args[0];
+    const value = args.slice(1).join(' ');
+    if (!key || !value) {
+      console.error('Usage: forge-tools config-set <key> <value>');
+      process.exit(1);
+    }
+    const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
+    bd(`kv set ${fullKey} ${value}`);
+    output({ ok: true, key: fullKey, value });
+  },
+
+  /**
+   * List all Forge config values.
+   */
+  'config-list'() {
+    const raw = bd('kv list --json', { allowFail: true });
+    let allKv = [];
+    if (raw) {
+      try {
+        allKv = JSON.parse(raw);
+      } catch {
+        // Try line-by-line format
+        allKv = [];
+      }
+    }
+    // Filter to forge.* keys
+    const forgeKv = (Array.isArray(allKv) ? allKv : []).filter(
+      kv => (kv.key || '').startsWith('forge.')
+    );
+    output({
+      config: forgeKv,
+      available_keys: [
+        { key: 'forge.context_warning', default: '0.35', description: 'Context warning threshold (0-1)' },
+        { key: 'forge.context_critical', default: '0.25', description: 'Context critical/block threshold (0-1)' },
+        { key: 'forge.update_check', default: 'true', description: 'Enable update check on session start' },
+        { key: 'forge.auto_research', default: 'true', description: 'Auto-run research before planning' },
+      ],
+    });
+  },
+
+  /**
+   * Clear a Forge config value.
+   */
+  'config-clear'(args) {
+    const key = args[0];
+    if (!key) {
+      console.error('Usage: forge-tools config-clear <key>');
+      process.exit(1);
+    }
+    const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
+    bd(`kv clear ${fullKey}`, { allowFail: true });
+    output({ ok: true, key: fullKey, cleared: true });
+  },
+
+  /**
    * Find the project bead in the current beads database.
    */
   'find-project'() {
