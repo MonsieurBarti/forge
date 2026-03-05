@@ -704,6 +704,199 @@ const commands = {
   },
 
   /**
+   * Diagnose project health: structural, dependency, and state issues.
+   */
+  health(args) {
+    const projectId = args[0];
+    if (!projectId) {
+      console.error('Usage: forge-tools health <project-bead-id>');
+      process.exit(1);
+    }
+
+    const project = bdJson(`show ${projectId}`);
+    if (!project) {
+      output({ error: 'Project not found', project_id: projectId });
+      return;
+    }
+
+    const children = bdJson(`children ${projectId}`);
+    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+
+    const phases = issues.filter(i =>
+      (i.labels || []).includes('forge:phase') || i.issue_type === 'epic'
+    ).filter(i => i.id !== projectId);
+    const requirements = issues.filter(i =>
+      (i.labels || []).includes('forge:req') || i.issue_type === 'feature'
+    );
+
+    const diagnostics = { structure: [], dependencies: [], state: [], installation: [] };
+
+    // --- Structure checks ---
+
+    const hasProjectLabel = (project.labels || []).includes('forge:project');
+    diagnostics.structure.push({
+      check: 'project_label',
+      ok: hasProjectLabel,
+      message: hasProjectLabel ? 'Project label present' : 'Project missing forge:project label',
+      fixable: !hasProjectLabel,
+      fix_target: hasProjectLabel ? null : projectId,
+    });
+
+    const unlabeledPhases = phases.filter(p => !(p.labels || []).includes('forge:phase'));
+    diagnostics.structure.push({
+      check: 'phase_labels',
+      ok: unlabeledPhases.length === 0,
+      message: unlabeledPhases.length === 0
+        ? `${phases.length}/${phases.length} phases labeled`
+        : `${unlabeledPhases.length} phase(s) missing forge:phase label`,
+      fixable: unlabeledPhases.length > 0,
+      fix_targets: unlabeledPhases.map(p => p.id),
+    });
+
+    // Check tasks within each phase
+    const allTasks = [];
+    const unlabeledTasks = [];
+    for (const phase of phases) {
+      const phaseChildren = bdJson(`children ${phase.id}`);
+      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      for (const t of tasks) {
+        allTasks.push({ ...t, phase_id: phase.id });
+        if (!(t.labels || []).includes('forge:task') && !(t.labels || []).includes('forge:research')) {
+          unlabeledTasks.push(t);
+        }
+      }
+    }
+
+    diagnostics.structure.push({
+      check: 'task_labels',
+      ok: unlabeledTasks.length === 0,
+      message: unlabeledTasks.length === 0
+        ? `${allTasks.length} tasks properly labeled`
+        : `${unlabeledTasks.length} task(s) missing forge:task label`,
+      fixable: unlabeledTasks.length > 0,
+      fix_targets: unlabeledTasks.map(t => t.id),
+    });
+
+    // --- Dependency checks ---
+
+    const uncoveredReqs = [];
+    for (const req of requirements) {
+      const deps = bd(`dep list ${req.id} --type validates`, { allowFail: true });
+      if (!deps || deps.trim() === '' || deps.includes('No dependencies')) {
+        uncoveredReqs.push(req);
+      }
+    }
+
+    diagnostics.dependencies.push({
+      check: 'requirement_coverage',
+      ok: uncoveredReqs.length === 0,
+      message: uncoveredReqs.length === 0
+        ? `${requirements.length}/${requirements.length} requirements covered`
+        : `${uncoveredReqs.length} requirement(s) without task coverage`,
+      severity: uncoveredReqs.length > 0 ? 'warning' : 'ok',
+      details: uncoveredReqs.map(r => ({ id: r.id, title: r.title })),
+    });
+
+    // --- State checks ---
+
+    const closedPhasesWithOpenTasks = [];
+    const closeablePhases = [];
+    for (const phase of phases) {
+      const phaseChildren = bdJson(`children ${phase.id}`);
+      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      const openTasks = tasks.filter(t => t.status !== 'closed');
+
+      if (phase.status === 'closed' && openTasks.length > 0) {
+        closedPhasesWithOpenTasks.push({ phase, open_tasks: openTasks });
+      }
+      if (phase.status !== 'closed' && tasks.length > 0 && openTasks.length === 0) {
+        closeablePhases.push(phase);
+      }
+    }
+
+    diagnostics.state.push({
+      check: 'closed_phase_open_tasks',
+      ok: closedPhasesWithOpenTasks.length === 0,
+      message: closedPhasesWithOpenTasks.length === 0
+        ? 'No closed phases with open tasks'
+        : `${closedPhasesWithOpenTasks.length} closed phase(s) have open tasks`,
+      severity: closedPhasesWithOpenTasks.length > 0 ? 'error' : 'ok',
+      details: closedPhasesWithOpenTasks.map(x => ({
+        phase_id: x.phase.id,
+        phase_title: x.phase.title,
+        open_task_ids: x.open_tasks.map(t => t.id),
+      })),
+    });
+
+    diagnostics.state.push({
+      check: 'closeable_phases',
+      ok: closeablePhases.length === 0,
+      message: closeablePhases.length === 0
+        ? 'No phases ready to close'
+        : `${closeablePhases.length} phase(s) have all tasks closed (suggest: verify/close)`,
+      severity: closeablePhases.length > 0 ? 'suggestion' : 'ok',
+      details: closeablePhases.map(p => ({ id: p.id, title: p.title })),
+    });
+
+    // --- Installation checks ---
+
+    const fs = require('fs');
+    const forgeDir = require('path').join(require('os').homedir(), '.claude', 'forge');
+
+    const expectedFiles = [
+      { path: 'bin/forge-tools.cjs', label: 'forge-tools.cjs' },
+      { path: 'workflows/new-project.md', label: 'new-project workflow' },
+      { path: 'workflows/plan-phase.md', label: 'plan-phase workflow' },
+      { path: 'workflows/execute-phase.md', label: 'execute-phase workflow' },
+      { path: 'workflows/verify.md', label: 'verify workflow' },
+      { path: 'workflows/progress.md', label: 'progress workflow' },
+      { path: 'workflows/health.md', label: 'health workflow' },
+      { path: 'references/conventions.md', label: 'conventions reference' },
+    ];
+
+    const missingFiles = [];
+    for (const f of expectedFiles) {
+      const full = require('path').join(forgeDir, f.path);
+      if (!fs.existsSync(full)) {
+        missingFiles.push(f.label);
+      }
+    }
+
+    diagnostics.installation.push({
+      check: 'forge_files',
+      ok: missingFiles.length === 0,
+      message: missingFiles.length === 0
+        ? 'All Forge files present'
+        : `Missing: ${missingFiles.join(', ')}`,
+      severity: missingFiles.length > 0 ? 'error' : 'ok',
+    });
+
+    // --- Summary ---
+
+    const allChecks = [
+      ...diagnostics.structure,
+      ...diagnostics.dependencies,
+      ...diagnostics.state,
+      ...diagnostics.installation,
+    ];
+    const errors = allChecks.filter(c => !c.ok && (c.severity === 'error' || c.fixable));
+    const warnings = allChecks.filter(c => !c.ok && c.severity === 'warning');
+    const suggestions = allChecks.filter(c => !c.ok && c.severity === 'suggestion');
+
+    output({
+      project: { id: project.id, title: project.title, status: project.status },
+      diagnostics,
+      summary: {
+        total_checks: allChecks.length,
+        healthy: allChecks.filter(c => c.ok).length,
+        errors: errors.length,
+        warnings: warnings.length,
+        suggestions: suggestions.length,
+      },
+    });
+  },
+
+  /**
    * Find the project bead in the current beads database.
    */
   'find-project'() {
