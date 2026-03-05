@@ -23,6 +23,7 @@ Output the following help guide directly (no tool calls needed):
 | `/forge:execute [phase]` | Execute tasks in a phase with wave-based parallelization |
 | `/forge:verify [phase]` | Verify phase completion against acceptance criteria |
 | `/forge:progress` | Show project progress dashboard from bead graph |
+| `/forge:health` | Diagnose project health and optionally repair issues |
 | `/forge:config` | View or modify configuration (`list`, `get`, `set`, `clear`) |
 | `/forge:pause` | Save session context for later resumption |
 | `/forge:resume` | Restore session context from previous pause |

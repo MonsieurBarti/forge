@@ -917,7 +917,7 @@ const commands = {
       (i.labels || []).includes('forge:req') || i.issue_type === 'feature'
     );
 
-    const diagnostics = { structure: [], dependencies: [], state: [], installation: [] };
+    const diagnostics = { structure: [], dependencies: [], state: [], config: [], installation: [] };
 
     // --- Structure checks ---
 
@@ -1026,10 +1026,107 @@ const commands = {
       details: closeablePhases.map(p => ({ id: p.id, title: p.title })),
     });
 
-    // --- Installation checks ---
+    // --- Config checks (bd kv + .forge/settings.yaml) ---
 
-    const fs = require('fs');
-    const forgeDir = require('path').join(require('os').homedir(), '.claude', 'forge');
+    const configIssues = [];
+    const numericKeys = ['context_warning', 'context_critical'];
+    const booleanKeys = ['update_check', 'auto_research'];
+
+    for (const key of numericKeys) {
+      const val = bd(`kv get forge.${key}`, { allowFail: true });
+      if (val && val.trim() !== '') {
+        const num = parseFloat(val.trim());
+        if (isNaN(num) || num < 0 || num > 1) {
+          configIssues.push({ key: `forge.${key}`, value: val.trim(), reason: 'must be a number between 0 and 1' });
+        }
+      }
+    }
+
+    for (const key of booleanKeys) {
+      const val = bd(`kv get forge.${key}`, { allowFail: true });
+      if (val && val.trim() !== '') {
+        if (!['true', 'false'].includes(val.trim().toLowerCase())) {
+          configIssues.push({ key: `forge.${key}`, value: val.trim(), reason: 'must be true or false' });
+        }
+      }
+    }
+
+    diagnostics.config.push({
+      check: 'bd_kv_config',
+      ok: configIssues.length === 0,
+      message: configIssues.length === 0
+        ? 'All forge.* bd kv values valid'
+        : `${configIssues.length} bd kv config value(s) invalid`,
+      severity: configIssues.length > 0 ? 'error' : 'ok',
+      details: configIssues,
+    });
+
+    // Check .forge/settings.yaml project config
+    const projectSettingsPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+    let settingsOk = true;
+    let settingsMessage = '';
+    const settingsIssues = [];
+
+    if (fs.existsSync(projectSettingsPath)) {
+      try {
+        const projectSettings = parseSimpleYaml(fs.readFileSync(projectSettingsPath, 'utf8'));
+        for (const [key, val] of Object.entries(projectSettings)) {
+          if (!(key in SETTINGS_DEFAULTS)) {
+            settingsIssues.push({ key, value: val, reason: 'unknown setting key' });
+          } else if (typeof SETTINGS_DEFAULTS[key] === 'boolean' && typeof val !== 'boolean') {
+            settingsIssues.push({ key, value: val, reason: 'expected boolean (true/false)' });
+          }
+        }
+        settingsOk = settingsIssues.length === 0;
+        settingsMessage = settingsOk
+          ? `.forge/settings.yaml valid (${Object.keys(projectSettings).length} keys)`
+          : `${settingsIssues.length} issue(s) in .forge/settings.yaml`;
+      } catch {
+        settingsOk = false;
+        settingsMessage = '.forge/settings.yaml exists but failed to parse';
+      }
+    } else {
+      settingsMessage = '.forge/settings.yaml not found (using defaults)';
+    }
+
+    diagnostics.config.push({
+      check: 'project_settings',
+      ok: settingsOk,
+      message: settingsMessage,
+      severity: !settingsOk && settingsIssues.length > 0 ? 'warning' : 'ok',
+      details: settingsIssues,
+    });
+
+    // Check global settings (~/.claude/forge.local.md)
+    let globalSettingsOk = true;
+    let globalSettingsMessage = '';
+    if (fs.existsSync(GLOBAL_SETTINGS_PATH)) {
+      try {
+        const globalText = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+        const globalSettings = parseFrontmatter(globalText);
+        const unknownKeys = Object.keys(globalSettings).filter(k => !(k in SETTINGS_DEFAULTS));
+        globalSettingsOk = unknownKeys.length === 0;
+        globalSettingsMessage = globalSettingsOk
+          ? `Global settings valid (${Object.keys(globalSettings).length} keys)`
+          : `${unknownKeys.length} unknown key(s) in global settings: ${unknownKeys.join(', ')}`;
+      } catch {
+        globalSettingsOk = false;
+        globalSettingsMessage = 'Global settings file exists but failed to parse';
+      }
+    } else {
+      globalSettingsMessage = 'No global settings file (using defaults)';
+    }
+
+    diagnostics.config.push({
+      check: 'global_settings',
+      ok: globalSettingsOk,
+      message: globalSettingsMessage,
+      severity: globalSettingsOk ? 'ok' : 'warning',
+    });
+
+    // --- Installation checks (~/.claude/forge/) ---
+
+    const forgeDir = path.join(os.homedir(), '.claude', 'forge');
 
     const expectedFiles = [
       { path: 'bin/forge-tools.cjs', label: 'forge-tools.cjs' },
@@ -1044,7 +1141,7 @@ const commands = {
 
     const missingFiles = [];
     for (const f of expectedFiles) {
-      const full = require('path').join(forgeDir, f.path);
+      const full = path.join(forgeDir, f.path);
       if (!fs.existsSync(full)) {
         missingFiles.push(f.label);
       }
@@ -1059,12 +1156,32 @@ const commands = {
       severity: missingFiles.length > 0 ? 'error' : 'ok',
     });
 
+    const versionFile = path.join(forgeDir, '.forge-version');
+    let versionOk = false;
+    let versionInfo = null;
+    if (fs.existsSync(versionFile)) {
+      try {
+        versionInfo = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+        versionOk = !!(versionInfo && versionInfo.version);
+      } catch { /* invalid JSON */ }
+    }
+
+    diagnostics.installation.push({
+      check: 'version_file',
+      ok: versionOk,
+      message: versionOk
+        ? `Version file valid (v${versionInfo.version})`
+        : 'Version file missing or invalid',
+      severity: versionOk ? 'ok' : 'warning',
+    });
+
     // --- Summary ---
 
     const allChecks = [
       ...diagnostics.structure,
       ...diagnostics.dependencies,
       ...diagnostics.state,
+      ...diagnostics.config,
       ...diagnostics.installation,
     ];
     const errors = allChecks.filter(c => !c.ok && (c.severity === 'error' || c.fixable));

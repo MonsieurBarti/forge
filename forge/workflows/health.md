@@ -1,5 +1,5 @@
 <purpose>
-Diagnose the health of a Forge project's bead graph and optionally repair issues.
+Diagnose the health of a Forge project. Forge is beads-native: persistent state lives in bd, config lives in bd kv (forge.* keys), and installation files live in ~/.claude/forge/. This workflow checks all three layers.
 </purpose>
 
 <process>
@@ -36,10 +36,15 @@ This performs the following checks:
 - **Closed phase with open tasks**: Phase marked `closed` but has unclosed children
 - **Open phase with all tasks closed**: Phase should be closeable
 
-### File Checks
+### Config Checks (bd kv)
+- **Config validity**: All `forge.*` keys in bd kv have valid values
+- **Known keys**: `forge.context_warning`, `forge.context_critical` are numeric 0-1
+- **Known keys**: `forge.update_check`, `forge.auto_research` are boolean strings
+
+### Installation Checks (~/.claude/forge/)
 - **forge-tools.cjs**: Exists at `~/.claude/forge/bin/forge-tools.cjs`
 - **Workflows**: All expected workflow files exist
-- **Commands**: All expected command files exist
+- **Version file**: `~/.claude/forge/.forge-version` exists and is valid JSON
 
 ## 3. Display Report
 
@@ -66,10 +71,14 @@ Format and display:
   [!!] Phase 3 closed but has 1 open task: <id>
   [--] Phase 4 has all tasks closed (suggest: close phase or verify)
 
-### Installation
+### Config (bd kv)
+  [ok] All forge.* config values valid
+  [--] forge.context_warning not set (using default: 0.35)
+
+### Installation (~/.claude/forge/)
   [ok] forge-tools.cjs found
   [ok] All workflows present
-  [ok] All commands present
+  [ok] Version file valid (v0.1.0)
 
 ## Summary: 2 errors, 1 warning, 1 suggestion
 ```

@@ -1,12 +1,12 @@
 ---
 name: forge:health
-description: Diagnose planning directory health and optionally repair issues
+description: Diagnose Forge project health and optionally repair issues
 argument-hint: "[--fix]"
 allowed-tools: Read, Bash, Grep, Glob, AskUserQuestion
 ---
 
 <objective>
-Diagnose the health of the current Forge project's bead graph. Check for missing files, broken state, orphaned phases, unlabeled beads, dependency issues, and uncovered requirements. Optionally repair fixable issues.
+Diagnose the health of the current Forge project. Checks bead graph integrity (labels, dependencies, state consistency), Forge installation files, and bd kv config validity. Optionally repair fixable issues.
 </objective>
 
 <context>
