@@ -13,6 +13,76 @@
  */
 
 const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const yaml = require ? null : null; // We'll parse YAML manually (simple subset)
+
+// --- Settings Paths ---
+
+const GLOBAL_SETTINGS_PATH = path.join(os.homedir(), '.claude', 'forge.local.md');
+const PROJECT_SETTINGS_NAME = '.forge/settings.yaml';
+
+// --- Settings Defaults ---
+
+const SETTINGS_DEFAULTS = {
+  skip_verification: false,
+  auto_commit: true,
+  require_discussion: true,
+  auto_research: true,
+  plan_check: true,
+  parallel_execution: true,
+};
+
+const SETTINGS_DESCRIPTIONS = {
+  skip_verification: 'Skip phase verification after execution',
+  auto_commit: 'Auto-commit after each completed task',
+  require_discussion: 'Require user discussion before planning',
+  auto_research: 'Auto-run research before planning',
+  plan_check: 'Run plan checker to validate plans',
+  parallel_execution: 'Execute independent tasks in parallel',
+};
+
+// --- Simple YAML Helpers ---
+
+function parseSimpleYaml(text) {
+  const result = {};
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx === -1) continue;
+    const key = trimmed.slice(0, colonIdx).trim();
+    let val = trimmed.slice(colonIdx + 1).trim();
+    if (val === 'true') val = true;
+    else if (val === 'false') val = false;
+    else if (/^\d+(\.\d+)?$/.test(val)) val = parseFloat(val);
+    result[key] = val;
+  }
+  return result;
+}
+
+function toSimpleYaml(obj) {
+  const lines = [];
+  for (const [key, val] of Object.entries(obj)) {
+    lines.push(`${key}: ${val}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+function parseFrontmatter(text) {
+  const match = text.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
+  return parseSimpleYaml(match[1]);
+}
+
+function writeFrontmatter(filePath, data, body) {
+  const yamlStr = toSimpleYaml(data);
+  const content = `---\n${yamlStr}---\n${body || ''}`;
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(filePath, content);
+}
 
 // --- Helpers ---
 
@@ -1012,6 +1082,203 @@ const commands = {
         suggestions: suggestions.length,
       },
     });
+  },
+
+  /**
+   * Load merged settings (defaults < global < project).
+   * Returns the effective settings with source annotations.
+   */
+  'settings-load'() {
+    const merged = { ...SETTINGS_DEFAULTS };
+    const sources = {};
+    for (const key of Object.keys(SETTINGS_DEFAULTS)) {
+      sources[key] = 'default';
+    }
+
+    // Layer 1: Global settings from ~/.claude/forge.local.md
+    try {
+      const globalText = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+      const globalSettings = parseFrontmatter(globalText);
+      for (const [key, val] of Object.entries(globalSettings)) {
+        if (key in SETTINGS_DEFAULTS) {
+          merged[key] = val;
+          sources[key] = 'global';
+        }
+      }
+    } catch {
+      // No global settings file
+    }
+
+    // Layer 2: Project settings from .forge/settings.yaml
+    try {
+      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      const projectText = fs.readFileSync(projectPath, 'utf8');
+      const projectSettings = parseSimpleYaml(projectText);
+      for (const [key, val] of Object.entries(projectSettings)) {
+        if (key in SETTINGS_DEFAULTS) {
+          merged[key] = val;
+          sources[key] = 'project';
+        }
+      }
+    } catch {
+      // No project settings file
+    }
+
+    const settings = Object.keys(SETTINGS_DEFAULTS).map(key => ({
+      key,
+      value: merged[key],
+      default: SETTINGS_DEFAULTS[key],
+      source: sources[key],
+      description: SETTINGS_DESCRIPTIONS[key],
+    }));
+
+    output({
+      settings,
+      global_path: GLOBAL_SETTINGS_PATH,
+      project_path: path.resolve(process.cwd(), PROJECT_SETTINGS_NAME),
+    });
+  },
+
+  /**
+   * Set a setting value. Scope: "global" or "project".
+   */
+  'settings-set'(args) {
+    const scope = args[0]; // "global" or "project"
+    const key = args[1];
+    const value = args[2];
+
+    if (!scope || !key || value === undefined) {
+      console.error('Usage: forge-tools settings-set <global|project> <key> <value>');
+      process.exit(1);
+    }
+
+    if (!(key in SETTINGS_DEFAULTS)) {
+      console.error(`Unknown setting: ${key}`);
+      console.error(`Available: ${Object.keys(SETTINGS_DEFAULTS).join(', ')}`);
+      process.exit(1);
+    }
+
+    let parsedValue = value;
+    if (value === 'true') parsedValue = true;
+    else if (value === 'false') parsedValue = false;
+
+    if (scope === 'global') {
+      let existing = {};
+      let body = '';
+      try {
+        const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+        existing = parseFrontmatter(text);
+        const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+        if (bodyMatch) body = bodyMatch[1];
+      } catch { /* new file */ }
+      existing[key] = parsedValue;
+      writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
+      output({ ok: true, scope, key, value: parsedValue });
+    } else if (scope === 'project') {
+      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      let existing = {};
+      try {
+        existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
+      } catch { /* new file */ }
+      existing[key] = parsedValue;
+      const dir = path.dirname(projectPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(projectPath, toSimpleYaml(existing));
+      output({ ok: true, scope, key, value: parsedValue });
+    } else {
+      console.error('Scope must be "global" or "project"');
+      process.exit(1);
+    }
+  },
+
+  /**
+   * Clear a setting from a scope (reverts to lower layer or default).
+   */
+  'settings-clear'(args) {
+    const scope = args[0];
+    const key = args[1];
+
+    if (!scope || !key) {
+      console.error('Usage: forge-tools settings-clear <global|project> <key>');
+      process.exit(1);
+    }
+
+    if (scope === 'global') {
+      try {
+        const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+        const existing = parseFrontmatter(text);
+        const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+        const body = bodyMatch ? bodyMatch[1] : '';
+        delete existing[key];
+        writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
+      } catch { /* file doesn't exist, nothing to clear */ }
+    } else if (scope === 'project') {
+      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      try {
+        const existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
+        delete existing[key];
+        fs.writeFileSync(projectPath, toSimpleYaml(existing));
+      } catch { /* file doesn't exist */ }
+    }
+
+    output({ ok: true, scope, key, cleared: true });
+  },
+
+  /**
+   * Bulk-set multiple settings at once from JSON input.
+   * Usage: forge-tools settings-bulk <global|project> '{"key":"value",...}'
+   */
+  'settings-bulk'(args) {
+    const scope = args[0];
+    const jsonStr = args.slice(1).join(' ');
+
+    if (!scope || !jsonStr) {
+      console.error('Usage: forge-tools settings-bulk <global|project> <json>');
+      process.exit(1);
+    }
+
+    let updates;
+    try {
+      updates = JSON.parse(jsonStr);
+    } catch {
+      console.error('Invalid JSON');
+      process.exit(1);
+    }
+
+    const results = [];
+    for (const [key, value] of Object.entries(updates)) {
+      if (!(key in SETTINGS_DEFAULTS)) continue;
+      // Re-use settings-set logic inline
+      let parsedValue = value;
+      if (value === 'true') parsedValue = true;
+      else if (value === 'false') parsedValue = false;
+
+      if (scope === 'global') {
+        let existing = {};
+        let body = '';
+        try {
+          const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+          existing = parseFrontmatter(text);
+          const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+          if (bodyMatch) body = bodyMatch[1];
+        } catch { /* new file */ }
+        existing[key] = parsedValue;
+        writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
+      } else if (scope === 'project') {
+        const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+        let existing = {};
+        try {
+          existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
+        } catch { /* new file */ }
+        existing[key] = parsedValue;
+        const dir = path.dirname(projectPath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(projectPath, toSimpleYaml(existing));
+      }
+      results.push({ key, value: parsedValue });
+    }
+
+    output({ ok: true, scope, updated: results });
   },
 
   /**
