@@ -25,7 +25,24 @@ CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id
 
 Verify phase is `in_progress` (has been planned). If not planned, suggest `/forge:plan` first.
 
-## 2. Load Checkpoint
+## 2. Switch to Phase Branch
+
+Ensure commits land on the correct phase branch, not main. Use `branch-create` which is
+idempotent — it creates the branch if missing or checks out the existing one:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-create <phase-id>
+```
+
+Verify you are now on the phase branch:
+```bash
+CURRENT_BRANCH=$(git branch --show-current)
+```
+
+If the branch name does not contain the phase ID, **stop and report the issue**.
+Do NOT proceed with execution on the wrong branch.
+
+## 3. Load Checkpoint
 
 Check for an existing checkpoint from a previous interrupted session:
 
@@ -34,9 +51,9 @@ CHECKPOINT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" checkpoint-load <pha
 ```
 
 If the checkpoint contains `completedWaves`, note which waves have already been executed.
-These will be skipped during wave execution in step 6.
+These will be skipped during wave execution in step 7.
 
-## 3. Preflight Check
+## 4. Preflight Check
 
 Run the preflight-check command to validate the phase is ready for execution:
 
@@ -49,7 +66,7 @@ to the user and **abort execution**. Do not proceed to wave detection or task ex
 
 If `verdict` is `PASS`, continue to the next step.
 
-## 4. Gather Rollback Metadata
+## 5. Gather Rollback Metadata
 
 Before execution begins, capture state needed for potential rollback:
 
@@ -66,7 +83,7 @@ Store these values (`preExistingClosed`, `branchName`, `baseCommitSha`) in every
 checkpoint-save call during wave execution. This enables `/forge:rollback` to know
 which tasks were closed by execution (vs already closed) and which commits to revert.
 
-## 5. Detect Waves
+## 6. Detect Waves
 
 Use the detect-waves tool to automatically group tasks by dependency order:
 
@@ -79,12 +96,12 @@ This returns a JSON structure with:
 - `summary`: counts of open/in_progress/closed tasks
 
 If `summary.tasks_open` is 0 and `summary.tasks_closed` equals `summary.total_tasks`,
-the phase is already complete — skip to step 7.
+the phase is already complete — skip to step 8.
 
 If the output contains `circular_or_external_dependency`, report the cycle and ask the user
 how to proceed.
 
-## 6. Execute Waves
+## 7. Execute Waves
 
 Before executing, resolve the model for the executor agent:
 ```bash
@@ -125,26 +142,20 @@ Project: <project vision>
 
 Instructions:
 1. Claim the task: bd update <task-id> --status=in_progress
-2. Read prior context from the phase bead to benefit from earlier waves:
-   node "\$HOME/.claude/forge/bin/forge-tools.cjs" context-read <phase-id>
-   Review the returned structured entries for prior agent findings, decisions, blockers, and artifacts. Use this context to inform your implementation.
-3. Implement the task following the description and acceptance criteria
-4. Run relevant tests to verify acceptance criteria are met
-5. Create an atomic git commit in the milestone worktree with a standardized message:
+2. Implement the task following the description and acceptance criteria
+3. Run relevant tests to verify acceptance criteria are met
+4. Verify you are on the phase branch (not main) before committing.
+   Create an atomic git commit with a standardized message:
    Format: <type>(phase-<phase-id>): <summary> [task <task-id>]
    Where <type> is one of: feat, fix, refactor, test, docs, chore
    Example: feat(phase-abc12): add branch-create command [task xyz99]
    Use git add <specific files> — never git add . or git add -A
    NEVER run git merge or gh pr merge — merging is always left to the user
-6. Close the task: bd close <task-id> --reason='<brief summary of what was done>'
-7. Write structured context to the phase bead so future agents benefit from your work:
-   node "\$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> '{"agent":"forge-executor","task":"<task-id>","status":"completed","findings":["<key finding 1>","<key finding 2>"],"decisions":["<decision made and rationale>"],"artifacts":["<file or resource produced>"],"next_steps":["<suggested follow-on if any>"]}'
+5. Close the task: bd close <task-id> --reason='<brief summary of what was done>'
 
 If you encounter a blocker:
 - bd update <task-id> --notes='BLOCKED: <description>'
 - Do NOT close the task
-- Write structured context capturing the blocker:
-  node "\$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> '{"agent":"forge-executor","task":"<task-id>","status":"blocked","findings":["<what was discovered before hitting the blocker>"],"decisions":[],"artifacts":[],"next_steps":["<what needs to be resolved to unblock>"]}'
 - Report the blocker in your response
 ")
 ```
@@ -166,7 +177,7 @@ Review the updated task statuses:
   - Fix the issue inline (if quick)
   - Stop execution and report (if the blocker affects downstream waves)
 
-## 7. Phase Completion Check
+## 8. Phase Completion Check
 
 After all waves complete:
 ```bash
@@ -201,7 +212,7 @@ user that all tasks are complete and that phase closure is owned by the verify w
 
 If some tasks remain open, report what's left and suggest next steps.
 
-## 8. Suggest Next Step
+## 9. Suggest Next Step
 
 - If phase complete and `skip_verification` is false: run `/forge:verify <phase>` to validate and close the phase
 - If phase complete and `skip_verification` is true: phase is already closed — run `/forge:plan <next-phase>` to continue
