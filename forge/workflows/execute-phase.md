@@ -15,7 +15,20 @@ CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id
 
 Verify phase is `in_progress` (has been planned). If not planned, suggest `/forge:plan` first.
 
-## 2. Detect Waves
+## 2. Preflight Check
+
+Run the preflight-check command to validate the phase is ready for execution:
+
+```bash
+PREFLIGHT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" preflight-check <phase-id>)
+```
+
+Parse the JSON result. If `verdict` is `FAIL`, display each issue from the `issues` array
+to the user and **abort execution**. Do not proceed to wave detection or task execution.
+
+If `verdict` is `PASS`, continue to the next step.
+
+## 3. Detect Waves
 
 Use the detect-waves tool to automatically group tasks by dependency order:
 
@@ -33,7 +46,7 @@ the phase is already complete — skip to step 4.
 If the output contains `circular_or_external_dependency`, report the cycle and ask the user
 how to proceed.
 
-## 3. Execute Waves
+## 4. Execute Waves
 
 Before executing, resolve the model for the executor agent:
 ```bash
@@ -95,36 +108,24 @@ Review the updated task statuses:
   - Fix the issue inline (if quick)
   - Stop execution and report (if the blocker affects downstream waves)
 
-## 4. Phase Completion Check
+## 5. Phase Completion Check
 
 After all waves complete:
 ```bash
 PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 ```
 
-If some tasks remain open, report what's left and suggest next steps.
-
-If all tasks are closed, load settings to determine next action:
-```bash
-SETTINGS=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load)
-```
-
-Check the `skip_verification` setting:
-
-**If `skip_verification` is false (default):** Do NOT close the phase directly. Instead, trigger
-verification by invoking `/forge:verify <phase-id>`. Phase closure is owned by the verify workflow
-and will happen there after UAT confirmation.
-
-**If `skip_verification` is true:** Close the phase directly:
+If all tasks are closed:
 ```bash
 bd close <phase-id> --reason="All tasks completed"
 bd remember "forge:phase:<id>:completed $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
-## 5. Suggest Next Step
+If some tasks remain open, report what's left and suggest next steps.
 
-- If phase complete and verification triggered: verification will suggest `/forge:plan <next-phase>` on success
-- If phase complete and skip_verification true: `/forge:plan <next-phase>` or `/forge:progress`
+## 6. Suggest Next Step
+
+- If phase complete: `/forge:verify <phase>` to verify, or `/forge:plan <next-phase>`
 - If tasks remaining: fix blockers, then `/forge:execute <phase>` again
 - Check overall progress: `/forge:progress`
 
