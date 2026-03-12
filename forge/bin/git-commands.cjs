@@ -113,11 +113,13 @@ module.exports = {
 
     const existing = git('branch --list ' + branch, { allowFail: true });
     if (existing) {
+      git(['checkout', branch]);
       output({ created: false, branch, reason: 'already_exists' });
       return;
     }
 
     git(['branch', branch]);
+    git(['checkout', branch]);
     output({ created: true, branch, phaseId, milestoneId });
   },
 
