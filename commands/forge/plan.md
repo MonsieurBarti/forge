@@ -1,7 +1,7 @@
 ---
 name: forge:plan
 description: Plan a phase -- research approach and create task beads with acceptance criteria
-argument-hint: "[phase-number-or-id]"
+argument-hint: "[phase-number-or-id] [--skip-research]"
 allowed-tools: Read, Write, Bash, Grep, Glob, Agent, AskUserQuestion, WebFetch, WebSearch
 ---
 
@@ -9,12 +9,21 @@ allowed-tools: Read, Write, Bash, Grep, Glob, Agent, AskUserQuestion, WebFetch, 
 Plan a specific phase of the project. Research the implementation approach, then create task beads under the phase epic with clear acceptance criteria and requirement traceability. Verify the plan passes quality checks before marking ready for execution.
 </objective>
 
+<usage>
+`/forge:plan [phase-number-or-id] [--skip-research]`
+
+Flags:
+- `--skip-research` — Skip the researcher agent invocation (step 3) and proceed directly to discussing the approach with the user. Useful when the implementation approach is already known or research was done separately.
+</usage>
+
 <context>
 Read the Forge conventions: @~/.claude/forge/references/conventions.md
 </context>
 
 <execution_context>
 Execute the plan-phase workflow from @~/.claude/forge/workflows/plan-phase.md end-to-end.
+
+If `--skip-research` was passed, skip step 3 entirely and proceed to step 4.
 
 When researching the implementation approach (step 3), use the Agent tool to spawn the **forge-researcher** agent.
 Pass it the phase title, goal, project context, and any relevant codebase pointers.

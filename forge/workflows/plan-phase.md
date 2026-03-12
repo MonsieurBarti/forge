@@ -35,12 +35,13 @@ If blocked, show what's blocking and suggest working on that first.
 
 ## 3. Research
 
-Check if auto-research is enabled (default: true):
+Skip this step and go to step 4 if any of the following is true:
+- The `--skip-research` flag was passed by the user.
+- `forge.auto_research` is `false`:
+
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" config-get auto_research
 ```
-
-If `forge.auto_research` is `false`, skip research and go to step 4.
 
 Resolve the model for the researcher agent:
 ```bash
@@ -68,9 +69,6 @@ Write your findings as a comment on the phase bead:
 bd comments add <phase-id> '<findings>'
 ")
 ```
-
-If the user prefers to skip research (e.g., they already know the approach), this step
-can be skipped by passing `--no-research` or when the user says so.
 
 ## 4. Context Check and Approach Discussion
 
