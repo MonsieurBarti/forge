@@ -218,7 +218,11 @@ function bdJson(args) {
   const raw = bd(`${args} --json`);
   if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (args.startsWith('show ') && Array.isArray(parsed)) {
+      return parsed[0] !== undefined ? parsed[0] : null;
+    }
+    return parsed;
   } catch {
     return null;
   }
