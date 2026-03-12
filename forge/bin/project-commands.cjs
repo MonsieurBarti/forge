@@ -245,19 +245,44 @@ module.exports = {
   /**
    * Find the project bead in the current beads database.
    */
-  'find-project'() {
-    const result = bd('list --label forge:project --json', { allowFail: true });
-    if (!result) {
-      output({ found: false });
+  'find-project'(args) {
+    // Explicit project argument takes precedence.
+    if (args && args.length > 0) {
+      const projectId = args[0];
+      output({ found: true, project_id: projectId, source: 'argument' });
       return;
     }
-    try {
-      const data = JSON.parse(result);
-      const issues = Array.isArray(data) ? data : (data.issues || []);
-      output({ found: issues.length > 0, projects: issues });
-    } catch {
-      output({ found: false });
+
+    const result = bd('list --label forge:project --json', { allowFail: true });
+    if (result) {
+      try {
+        const data = JSON.parse(result);
+        const issues = Array.isArray(data) ? data : (data.issues || []);
+        if (issues.length > 0) {
+          output({ found: true, projects: issues, source: 'beads' });
+          return;
+        }
+      } catch {
+        // fall through to cwd check
+      }
     }
+
+    // Fallback: check .forge/settings.yaml in cwd for a project_id field.
+    const settingsPath = path.join(process.cwd(), '.forge', 'settings.yaml');
+    if (fs.existsSync(settingsPath)) {
+      try {
+        const raw = fs.readFileSync(settingsPath, 'utf8');
+        const settings = parseSimpleYaml(raw);
+        if (settings && settings.project_id) {
+          output({ found: true, project_id: settings.project_id, source: 'cwd_settings' });
+          return;
+        }
+      } catch {
+        // fall through
+      }
+    }
+
+    output({ found: false });
   },
 
   /**
