@@ -75,13 +75,56 @@ open -> deferred (explicitly deferred for later)
 
 ## Memories
 
-Forge uses `bd remember` for persistent context:
-- `forge:project:<id>:vision` -- Project vision statement
-- `forge:project:<id>:decisions` -- Key architecture decisions
-- `forge:milestone:<id>:goal` -- Milestone goal statement
-- `forge:phase:<id>:approach` -- Chosen implementation approach
-- `forge:session:last-phase` -- Last active phase for resume
-- `forge:session:last-milestone` -- Last active milestone for resume
+Forge uses `bd remember` for persistent context. All keys are namespaced under `forge:` and
+can be listed at any time with `bd memories forge:` or via `/forge:memories`.
+
+### Project Memories (`forge:project:<id>:*`)
+
+| Key | Written by | Content |
+|-----|-----------|---------|
+| `forge:project:<id>:vision` | `/forge:new` | Project vision statement |
+| `forge:project:<id>:decisions` | workflows | Key architecture / design decisions |
+
+### Milestone Memories (`forge:milestone:<id>:*`)
+
+| Key | Written by | Content |
+|-----|-----------|---------|
+| `forge:milestone:<id>:goal` | `/forge:new-milestone` | Milestone goal statement |
+
+### Phase Memories (`forge:phase:<id>:*`)
+
+| Key | Written by | Content |
+|-----|-----------|---------|
+| `forge:phase:<id>:approach` | `/forge:plan` | Chosen implementation approach for the phase |
+| `forge:phase:<id>:completed` | `/forge:verify` | ISO timestamp when phase was verified complete |
+
+### Session Memories (`forge:session:*`)
+
+Session memories persist the most recent active context so sessions can be resumed.
+
+| Key | Written by | Content |
+|-----|-----------|---------|
+| `forge:session:project-id` | `/forge:new`, `/forge:resume` | ID of the active project |
+| `forge:session:current-phase` | `/forge:execute`, `/forge:plan` | ID of the currently active phase |
+| `forge:session:notes` | `/forge:pause` | Free-form notes saved at pause time |
+
+### Memory Lifecycle
+
+```bash
+# Write a memory
+bd remember forge:phase:<id>:approach "Two-wave implementation: ..."
+
+# Read a specific memory
+bd memories forge:phase:<id>:approach
+
+# List all forge memories (all types)
+bd memories forge:
+
+# Remove a memory
+bd forget forge:session:notes
+```
+
+Use `/forge:memories` to browse all stored memories grouped by type.
 
 ## Querying Patterns
 
