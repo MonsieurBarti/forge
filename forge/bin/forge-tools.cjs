@@ -423,7 +423,7 @@ const commands = {
     const children = bdJson(`children ${phaseId}`);
     const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
 
-    const issues = [];
+    const findings = [];
     const tasksWithoutCriteria = [];
     const tasksWithoutLabel = [];
 
@@ -437,18 +437,22 @@ const commands = {
     }
 
     if (tasksWithoutCriteria.length > 0) {
-      issues.push({
-        type: 'missing_acceptance_criteria',
-        severity: 'error',
-        tasks: tasksWithoutCriteria,
+      const taskList = tasksWithoutCriteria.map(t => `${t.id} (${t.title})`).join(', ');
+      findings.push({
+        number: findings.length + 1,
+        severity: 'blocker',
+        description: `${tasksWithoutCriteria.length} task(s) are missing acceptance criteria: ${taskList}`,
+        fix: `Run: bd update <task-id> --acceptance_criteria="<specific, testable criteria>" for each task listed above.`,
       });
     }
 
     if (tasksWithoutLabel.length > 0) {
-      issues.push({
-        type: 'missing_forge_task_label',
-        severity: 'warning',
-        tasks: tasksWithoutLabel,
+      const taskList = tasksWithoutLabel.map(t => `${t.id} (${t.title})`).join(', ');
+      findings.push({
+        number: findings.length + 1,
+        severity: 'suggestion',
+        description: `${tasksWithoutLabel.length} task(s) are missing the forge:task label: ${taskList}`,
+        fix: `Run: bd label add <task-id> forge:task for each task listed above.`,
       });
     }
 
@@ -478,21 +482,33 @@ const commands = {
       }
 
       if (uncoveredReqs.length > 0) {
-        issues.push({
-          type: 'uncovered_requirements',
-          severity: 'warning',
-          requirements: uncoveredReqs,
+        const reqList = uncoveredReqs.map(r => `${r.id} (${r.title})`).join(', ');
+        findings.push({
+          number: findings.length + 1,
+          severity: 'suggestion',
+          description: `${uncoveredReqs.length} requirement(s) have no validates links from any task: ${reqList}`,
+          fix: `Run: bd dep add <task-id> <req-id> --type=validates for each requirement to establish traceability.`,
         });
       }
     }
 
-    const passed = issues.filter(i => i.severity === 'error').length === 0;
+    const hasBlockers = findings.some(f => f.severity === 'blocker');
+    const verdict = hasBlockers ? 'NEEDS_REVISION' : 'APPROVED';
+
+    // Legacy issues array for backwards compatibility
+    const issues = findings.map(f => ({
+      type: f.severity === 'blocker' ? 'blocker' : 'suggestion',
+      severity: f.severity === 'blocker' ? 'error' : 'warning',
+      description: f.description,
+      fix: f.fix,
+    }));
 
     output({
       phase_id: phaseId,
       phase_title: phase?.title,
       total_tasks: tasks.length,
-      verdict: passed ? 'PASS' : 'NEEDS_REVISION',
+      verdict,
+      findings,
       issues,
       summary: {
         tasks_with_criteria: tasks.length - tasksWithoutCriteria.length,
@@ -500,6 +516,84 @@ const commands = {
         tasks_with_label: tasks.length - tasksWithoutLabel.length,
         uncovered_requirements: uncoveredReqs.length,
       },
+    });
+  },
+
+  /**
+   * Pre-flight check before executing a phase.
+   * Validates: (a) all blocker/predecessor phases are closed,
+   *            (b) at least one task exists under the phase,
+   *            (c) all tasks have acceptance_criteria set.
+   */
+  'preflight-check'(args) {
+    const phaseId = args[0];
+    if (!phaseId) {
+      console.error('Usage: forge-tools preflight-check <phase-bead-id>');
+      process.exit(1);
+    }
+
+    const phase = bdJson(`show ${phaseId}`);
+    const children = bdJson(`children ${phaseId}`);
+    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+
+    const issues = [];
+
+    // Check (a): all blocker/predecessor phases are closed
+    const depsRaw = bd(`dep list ${phaseId} --json`, { allowFail: true });
+    let deps = [];
+    if (depsRaw) {
+      try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+    }
+    const blockerDeps = Array.isArray(deps)
+      ? deps.filter(d => d.type === 'blocks' || d.type === 'predecessor' || d.type === 'blocked-by')
+      : [];
+    const openBlockers = [];
+    for (const dep of blockerDeps) {
+      const blockerId = dep.from || dep.source || dep.id;
+      if (!blockerId || blockerId === phaseId) continue;
+      const blocker = bdJson(`show ${blockerId}`);
+      if (blocker && blocker.status !== 'closed') {
+        openBlockers.push({ id: blockerId, title: blocker.title, status: blocker.status });
+      }
+    }
+    if (openBlockers.length > 0) {
+      const list = openBlockers.map(b => `${b.id} (${b.title}, status: ${b.status})`).join(', ');
+      issues.push({
+        type: 'blocker_phase_open',
+        severity: 'error',
+        details: `${openBlockers.length} blocker phase(s) are not closed: ${list}`,
+      });
+    }
+
+    // Check (b): at least one task exists
+    if (tasks.length === 0) {
+      issues.push({
+        type: 'no_tasks',
+        severity: 'error',
+        details: 'No tasks exist under this phase.',
+      });
+    }
+
+    // Check (c): all tasks have acceptance_criteria
+    const tasksWithoutCriteria = tasks.filter(
+      t => !t.acceptance_criteria || t.acceptance_criteria.trim() === ''
+    );
+    if (tasksWithoutCriteria.length > 0) {
+      const list = tasksWithoutCriteria.map(t => `${t.id} (${t.title})`).join(', ');
+      issues.push({
+        type: 'missing_acceptance_criteria',
+        severity: 'error',
+        details: `${tasksWithoutCriteria.length} task(s) are missing acceptance_criteria: ${list}`,
+      });
+    }
+
+    const verdict = issues.some(i => i.severity === 'error') ? 'FAIL' : 'PASS';
+
+    output({
+      phase_id: phaseId,
+      phase_title: phase?.title,
+      verdict,
+      issues,
     });
   },
 
