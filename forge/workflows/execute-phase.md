@@ -60,6 +60,8 @@ Task: <task title> (<task-id>)
 Description: <task description>
 Acceptance Criteria: <acceptance_criteria>
 Phase Context: <phase description>
+Phase Notes: <phase notes, omit if null>
+Phase Design: <phase design, omit if null>
 Project: <project vision>
 
 Instructions:

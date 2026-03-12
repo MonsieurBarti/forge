@@ -313,7 +313,8 @@ const commands = {
       process.exit(1);
     }
 
-    const phase = bdJson(`show ${phaseId}`);
+    const phaseRaw = bdJson(`show ${phaseId}`);
+    const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
     const children = bdJson(`children ${phaseId}`);
     const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
 
@@ -322,7 +323,14 @@ const commands = {
     const done = tasks.filter(t => t.status === 'closed');
 
     output({
-      phase,
+      phase: {
+        id: phase?.id,
+        title: phase?.title,
+        description: phase?.description,
+        notes: phase?.notes || null,
+        design: phase?.design || null,
+        status: phase?.status,
+      },
       tasks,
       summary: {
         total: tasks.length,
