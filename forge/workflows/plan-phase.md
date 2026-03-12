@@ -72,19 +72,94 @@ bd comments add <phase-id> '<findings>'
 If the user prefers to skip research (e.g., they already know the approach), this step
 can be skipped by passing `--no-research` or when the user says so.
 
-## 4. Discuss Approach with User
+## 4. Context Check and Approach Discussion
 
-Present the research findings (if any) and the phase goal.
-Ask the user:
-1. Any preferences for implementation approach?
-2. Any constraints or decisions to lock in?
-3. Estimated number of tasks (suggest 2-5)?
+Check whether the phase already has context notes:
 
-Save decisions:
 ```bash
-bd remember "forge:phase:<id>:approach <chosen approach>"
-bd update <phase-id> --notes="Approach: <summary of decisions>"
+bd show <phase-id> --json
 ```
+
+Inspect the `notes` field.
+
+**If notes already exist:** Skip the inline discuss and proceed directly to step 5. The
+existing notes contain sufficient context for planning. Briefly acknowledge what context is
+present (e.g., "Phase notes found -- proceeding with existing context.").
+
+**If notes are empty or absent:** Run the following condensed inline discuss before
+proceeding to step 5.
+
+---
+
+### Inline Discuss (runs only when no prior notes exist)
+
+The goal is to capture a goal statement and key decisions so downstream planning is
+grounded. This is intentionally lightweight -- not the full discuss-phase workflow.
+
+**Step A: Scout codebase quickly**
+
+Check whether relevant code exists to inform options:
+```bash
+ls src/ app/ lib/ 2>/dev/null | head -20
+```
+
+Read 1-2 of the most relevant existing files if they exist.
+
+**Step B: Identify 2-3 gray areas**
+
+From the phase description and any codebase context, identify the 2-3 implementation
+decisions that most affect what gets built. Think: what would change the outcome if decided
+differently? These are phase-specific, not generic categories.
+
+Examples:
+- "User authentication" -> Session handling, Error responses, Recovery flow
+- "CLI for backups" -> Output format, Progress reporting, Error recovery
+
+**Step C: Present and discuss with user**
+
+Present the phase domain clearly:
+```
+Phase [X]: [Name]
+Goal: [What this phase delivers]
+
+I need a few quick decisions to guide planning.
+```
+
+Use AskUserQuestion (multiSelect: true) to let the user pick which gray areas to discuss:
+- header: "Quick decisions"
+- question: "Which areas need clarification for [phase name]?"
+- options: the 2-3 gray areas identified above
+
+For each selected area, ask 1-2 focused questions using AskUserQuestion:
+- header: "[Area]" (max 12 chars)
+- question: Specific decision
+- options: 2-3 concrete choices (include "You decide" when reasonable)
+
+Keep total questions to 4-6 across all areas. This is a brief alignment pass, not a full
+discussion session.
+
+**Step D: Store results as phase notes**
+
+After the brief discussion, write structured notes to the phase bead:
+
+```bash
+bd update <phase-id> --notes="## Goal
+
+[One sentence: what this phase delivers and why it matters]
+
+## Key Decisions
+
+- [Area]: [Decision captured]
+- [Area]: [Decision captured]
+
+## Claude's Discretion
+
+[Areas where user said 'you decide' or no strong preference expressed]"
+```
+
+---
+
+Continue to step 5 (Create Task Beads) with the notes now populated.
 
 ## 5. Create Task Beads
 
