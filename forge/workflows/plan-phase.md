@@ -133,38 +133,45 @@ ls src/ app/ lib/ 2>/dev/null | head -20
 
 Read 1-2 of the most relevant existing files if they exist.
 
-**Step B: Identify 2-3 gray areas**
+**Step B: Identify 2-3 specific gray areas**
 
 From the phase description and any codebase context, identify the 2-3 implementation
 decisions that most affect what gets built. Think: what would change the outcome if decided
-differently? These are phase-specific, not generic categories.
+differently? These must be **phase-specific and concrete** — not generic category labels.
 
-Examples:
-- "User authentication" -> Session handling, Error responses, Recovery flow
-- "CLI for backups" -> Output format, Progress reporting, Error recovery
+Domain-driven examples:
+- "User authentication" -> "Session handling: cookie vs JWT?" / "Error responses: redirect or inline?" / "Recovery: email link or SMS?"
+- "CLI for backups" -> "Output format: JSON, table, or plain text?" / "Progress: spinner, percentage, or silent?" / "On error: abort-all or skip-and-continue?"
+- "Feed display" -> "Layout: cards vs list?" / "Empty state: illustration or text-only?" / "Load more: pagination or infinite scroll?"
+
+**Do NOT use generic labels** like "UI", "UX", "Behavior", or "Performance". Each gray area must be a specific decision with concrete option tradeoffs.
 
 **Step C: Present and discuss with user**
 
-Present the phase domain clearly:
+State the phase goal and frame the discussion:
 ```
 Phase [X]: [Name]
 Goal: [What this phase delivers]
 
-I need a few quick decisions to guide planning.
+Before I plan the tasks, I need a few concrete decisions.
 ```
 
-Use AskUserQuestion (multiSelect: true) to let the user pick which gray areas to discuss:
+Use AskUserQuestion (multiSelect: true) to let the user pick which areas to clarify:
 - header: "Quick decisions"
-- question: "Which areas need clarification for [phase name]?"
-- options: the 2-3 gray areas identified above
+- question: "Which of these need your input for [phase name]?"
+- options: the 2-3 specific gray areas from Step B, each phrased as a concrete question
+  (e.g., "Session handling: cookie vs JWT?" not "Session handling")
 
-For each selected area, ask 1-2 focused questions using AskUserQuestion:
-- header: "[Area]" (max 12 chars)
-- question: Specific decision
-- options: 2-3 concrete choices (include "You decide" when reasonable)
+For each selected area, ask 1-2 focused follow-up questions using AskUserQuestion:
+- header: "[Area]" (max 12 chars, abbreviate if needed)
+- question: The specific decision to make
+- options: 2-3 **concrete, named choices** — not abstract options. Annotate with codebase
+  context if relevant (e.g., "Cards (reuses existing Card component)" vs "List (new pattern)").
+  Include "You decide" when the choice is low-stakes.
 
-Keep total questions to 4-6 across all areas. This is a brief alignment pass, not a full
-discussion session.
+Keep total questions to 4-6 across all areas. This is a focused alignment pass, not a full
+discussion session. The goal is zero ambiguity entering execute — every task the planner
+creates should be unambiguous given the notes produced here.
 
 **Step D: Store results as phase notes**
 
