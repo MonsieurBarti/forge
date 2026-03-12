@@ -158,7 +158,7 @@ module.exports = {
     for (const task of tasks) {
       const taskDeps = bdJson(`dep list ${task.id}`);
       const taskDepList = Array.isArray(taskDeps) ? taskDeps : (taskDeps?.dependencies || []);
-      const validates = taskDepList.filter(d => d.type === 'validates');
+      const validates = taskDepList.filter(d => d.dependency_type === 'validates');
       for (const v of validates) {
         reqCoverage.push({ taskId: task.id, taskTitle: task.title, reqId: v.depends_on_id });
       }
@@ -188,7 +188,7 @@ module.exports = {
 
     const deps = bdJson(`dep list ${phaseId}`);
     const depList = Array.isArray(deps) ? deps : (deps?.dependencies || []);
-    const parentDep = depList.find(d => d.type === 'parent-child');
+    const parentDep = depList.find(d => d.dependency_type === 'parent-child');
 
     let milestoneId = null;
     if (parentDep) {
