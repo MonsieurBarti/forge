@@ -2922,6 +2922,105 @@ const commands = {
       output({ created: false, error: err.message, branch, base });
     }
   },
+
+  /**
+   * Write structured agent context to a phase bead as a JSON comment.
+   * Usage: forge-tools context-write <phase-id> <json-string>
+   *
+   * JSON schema fields:
+   *   agent    (string, required) - agent name (e.g. "forge-executor", "forge-researcher")
+   *   task     (string, optional) - task bead ID
+   *   status   (string, required) - "completed" | "blocked" | "in_progress"
+   *   findings (array of strings, optional) - key discoveries
+   *   decisions (array of strings, optional) - choices made
+   *   blockers (array of strings, optional) - blocking issues
+   *   artifacts (array of strings, optional) - files created/modified
+   *   next_steps (array of strings, optional) - suggested follow-ups
+   */
+  'context-write'(args) {
+    const phaseId = args[0];
+    const jsonStr = args.slice(1).join(' ');
+    if (!phaseId || !jsonStr) {
+      console.error('Usage: forge-tools context-write <phase-id> <json-string>');
+      process.exit(1);
+    }
+
+    let ctx;
+    try {
+      ctx = JSON.parse(jsonStr);
+    } catch {
+      console.error('Invalid JSON input');
+      process.exit(1);
+    }
+
+    // Validate required fields
+    if (!ctx.agent || !ctx.status) {
+      console.error('Required fields: agent, status');
+      process.exit(1);
+    }
+
+    // Normalize optional array fields
+    const schema = {
+      agent: ctx.agent,
+      task: ctx.task || null,
+      status: ctx.status,
+      findings: ctx.findings || [],
+      decisions: ctx.decisions || [],
+      blockers: ctx.blockers || [],
+      artifacts: ctx.artifacts || [],
+      next_steps: ctx.next_steps || [],
+      timestamp: new Date().toISOString(),
+    };
+
+    // Write to temp file to avoid shell escaping issues
+    const tmpFile = path.join(os.tmpdir(), `forge-ctx-${Date.now()}.json`);
+    fs.writeFileSync(tmpFile, JSON.stringify(schema, null, 2));
+
+    try {
+      bdArgs(['comments', 'add', phaseId, '-f', tmpFile]);
+      output({ written: true, phaseId, agent: schema.agent, task: schema.task });
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch {}
+    }
+  },
+
+  /**
+   * Read all structured JSON context comments from a phase bead.
+   * Usage: forge-tools context-read <phase-id>
+   *
+   * Filters out non-JSON comments and returns only valid structured context entries.
+   */
+  'context-read'(args) {
+    const phaseId = args[0];
+    if (!phaseId) {
+      console.error('Usage: forge-tools context-read <phase-id>');
+      process.exit(1);
+    }
+
+    const comments = bdJson(`comments ${phaseId}`);
+    if (!comments) {
+      output({ phaseId, contexts: [] });
+      return;
+    }
+
+    const list = Array.isArray(comments) ? comments : (comments.comments || []);
+    const contexts = [];
+
+    for (const c of list) {
+      const body = c.body || c.content || c.text || '';
+      try {
+        const parsed = JSON.parse(body);
+        // Must have agent and status to be a valid context entry
+        if (parsed.agent && parsed.status) {
+          contexts.push(parsed);
+        }
+      } catch {
+        // Not JSON — skip (free-text comment)
+      }
+    }
+
+    output({ phaseId, contexts });
+  },
 };
 
 // --- Main ---
