@@ -821,7 +821,7 @@ const commands = {
 
     // Also store in bd remember for fast lookup
     const memoryKey = `forge:checkpoint:${phaseId}`;
-    bdArgs(['remember', checkpointJson, '--key', memoryKey], { allowFail: true });
+    bdArgs(['remember', '--key', memoryKey, checkpointJson], { allowFail: true });
 
     output({ saved: true, phaseId, checkpoint });
   },
@@ -1001,7 +1001,7 @@ const commands = {
     // Save structured session state
     const memoryKey = `forge:session:state`;
     const memoryValue = `${timestamp} project=${projectId} phase=${sessionData.current_phase || 'none'} progress=${completedPhases}/${phases.length} in_flight=${inProgressTasks.map(t => t.id).join(',')}`;
-    bd(`remember "${memoryKey} ${memoryValue}"`);
+    bdArgs(['remember', '--key', memoryKey, memoryValue], { allowFail: true });
 
     output({ saved: true, session: sessionData });
   },
