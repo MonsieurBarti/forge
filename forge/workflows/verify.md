@@ -112,6 +112,48 @@ If some tasks need rework (no --force):
 - Report which tasks need attention
 - Suggest `/forge:execute <phase>` to redo failed tasks
 
+## 5.1. Capture Phase Retrospective
+
+This step runs only when the phase is being closed (all tasks verified or --force override).
+Skip this step if closure was blocked (no --force and tasks failed).
+
+**Derive counts from phase context:**
+- `task_count` = total number of tasks in `tasks_to_verify` + `tasks_still_open`
+- `blocker_count` = number of tasks whose notes contain "BLOCKED"
+- `forced` = true if --force was passed, false otherwise
+
+**Ask for approach effectiveness rating:**
+
+Use AskUserQuestion:
+- Question: "How effective was the overall approach for this phase? Rate 1-5."
+- Options: "1 - Poor" / "2 - Below average" / "3 - Average" / "4 - Good" / "5 - Excellent"
+
+Store the numeric rating (1–5) as `approach_effectiveness`.
+
+**Ask for key lessons:**
+
+Use AskUserQuestion:
+- Question: "Any key lessons learned from this phase? (Enter a short sentence, or leave blank to skip)"
+- Options: free text input or "Skip"
+
+If the user provides a lesson, store it as a single-element array: `["<lesson>"]`.
+If the user skips, store an empty array: `[]`.
+
+**Write the retrospective entry:**
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> \
+  '{"agent":"forge-verifier","status":"completed","task_count":<N>,"blocker_count":<N>,"approach_effectiveness":<1-5>,"key_lessons":[<lessons>],"forced":<bool>}'
+```
+
+Replace `<N>`, `<1-5>`, `<lessons>`, and `<bool>` with the actual derived values before running.
+
+Example with real values:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write phase-abc123 \
+  '{"agent":"forge-verifier","status":"completed","task_count":5,"blocker_count":1,"approach_effectiveness":4,"key_lessons":["Parallel agents reduced wall time significantly"],"forced":false}'
+```
+
 ## 5.5. Push Branch and Create Pull Request
 
 After the phase is closed (all tasks verified), push the phase branch and open a PR for
