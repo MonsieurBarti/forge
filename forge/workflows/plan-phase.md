@@ -314,6 +314,18 @@ Show: tasks, their acceptance criteria, requirement links, and execution order (
 bd update <phase-id> --status=in_progress
 ```
 
+Create a dedicated branch for this phase. The branch is created from current HEAD in the
+milestone worktree (if one exists) or the main repo:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-create <phase-id>
+```
+
+This creates the branch `forge/m<milestone-id>/phase-<phase-id>`. If the branch already
+exists (e.g., re-running plan on a phase), the command is idempotent — it will report the
+existing branch and check it out without error. If no milestone parent exists, a branch
+named `forge/phase-<phase-id>` is created instead.
+
 Suggest next step: `/forge:execute <phase-number>` or `/forge:plan <next-phase>`.
 
 </process>

@@ -127,7 +127,12 @@ Instructions:
 1. Claim the task: bd update <task-id> --status=in_progress
 2. Implement the task following the description and acceptance criteria
 3. Run relevant tests to verify acceptance criteria are met
-4. Create an atomic git commit with a descriptive message
+4. Create an atomic git commit in the milestone worktree with a standardized message:
+   Format: <type>(phase-<phase-id>): <summary> [task <task-id>]
+   Where <type> is one of: feat, fix, refactor, test, docs, chore
+   Example: feat(phase-abc12): add branch-create command [task xyz99]
+   Use git add <specific files> — never git add . or git add -A
+   NEVER run git merge or gh pr merge — merging is always left to the user
 5. Close the task: bd close <task-id> --reason='<brief summary of what was done>'
 
 If you encounter a blocker:
