@@ -102,17 +102,29 @@ After all waves complete:
 PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 ```
 
-If all tasks are closed:
+If some tasks remain open, report what's left and suggest next steps.
+
+If all tasks are closed, load settings to determine next action:
+```bash
+SETTINGS=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load)
+```
+
+Check the `skip_verification` setting:
+
+**If `skip_verification` is false (default):** Do NOT close the phase directly. Instead, trigger
+verification by invoking `/forge:verify <phase-id>`. Phase closure is owned by the verify workflow
+and will happen there after UAT confirmation.
+
+**If `skip_verification` is true:** Close the phase directly:
 ```bash
 bd close <phase-id> --reason="All tasks completed"
 bd remember "forge:phase:<id>:completed $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
-If some tasks remain open, report what's left and suggest next steps.
-
 ## 5. Suggest Next Step
 
-- If phase complete: `/forge:verify <phase>` to verify, or `/forge:plan <next-phase>`
+- If phase complete and verification triggered: verification will suggest `/forge:plan <next-phase>` on success
+- If phase complete and skip_verification true: `/forge:plan <next-phase>` or `/forge:progress`
 - If tasks remaining: fix blockers, then `/forge:execute <phase>` again
 - Check overall progress: `/forge:progress`
 
