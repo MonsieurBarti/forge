@@ -204,6 +204,16 @@ module.exports = {
       ? `forge/m-${milestoneId}/phase-${phaseId}`
       : `forge/phase-${phaseId}`;
 
+    // Idempotency: if a PR already exists for this branch, return it
+    try {
+      const existing = execFileSync('gh', [
+        'pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url',
+      ], { encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+      if (existing) {
+        return output({ created: false, url: existing, branch, base, title });
+      }
+    } catch (_) { /* no existing PR, proceed */ }
+
     try {
       const prResult = execFileSync('gh', [
         'pr', 'create',
