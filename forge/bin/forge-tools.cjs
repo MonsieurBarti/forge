@@ -336,6 +336,340 @@ function resolveAgentModel(agentName) {
   };
 }
 
+// --- Dashboard HTML Generator ---
+
+function generateDashboardHTML(data) {
+  const {
+    projectTitle, projectId, timestamp, progressPercent,
+    totalPhases, completedPhases, phaseDetails, reqCoverage,
+  } = data;
+
+  const phasesOpen = phaseDetails.filter(p => p.status === 'open').length;
+  const phasesInProgress = phaseDetails.filter(p => p.status === 'in_progress').length;
+  const reqsCovered = reqCoverage.filter(r => r.covered).length;
+  const reqsTotal = reqCoverage.length;
+
+  // Build phase cards HTML
+  const phaseCardsHTML = phaseDetails.map((phase, i) => {
+    const pct = phase.tasks_total > 0 ? Math.round((phase.tasks_closed / phase.tasks_total) * 100) : 0;
+    const statusClass = phase.status === 'closed' ? 'phase-done' : phase.status === 'in_progress' ? 'phase-active' : 'phase-pending';
+    const statusBadge = phase.status === 'closed' ? 'Done' : phase.status === 'in_progress' ? 'Active' : 'Pending';
+    const tasksHTML = phase.tasks.map(t => {
+      const icon = t.status === 'closed' ? '&#x2713;' : t.status === 'in_progress' ? '&#x25B6;' : '&#x25CB;';
+      const cls = t.status === 'closed' ? 'task-done' : t.status === 'in_progress' ? 'task-active' : 'task-pending';
+      const hasDetails = t.description || t.acceptance_criteria;
+      const detailsHTML = hasDetails ? `
+        <div class="task-details">
+          ${t.description ? `<div class="task-desc"><strong>Description:</strong> ${esc(t.description)}</div>` : ''}
+          ${t.acceptance_criteria ? `<div class="task-ac"><strong>Acceptance Criteria:</strong><pre>${esc(t.acceptance_criteria)}</pre></div>` : ''}
+        </div>` : '';
+      return `<li class="${cls}">
+        <details${hasDetails ? '' : ' class="no-detail"'}>
+          <summary><span class="task-icon">${icon}</span> ${esc(t.title)} <code>${t.id}</code></summary>
+          ${detailsHTML}
+        </details>
+      </li>`;
+    }).join('\n');
+    const phaseDescHTML = phase.description ? `<p class="phase-desc">${esc(phase.description)}</p>` : '';
+    return `
+      <div class="phase-card ${statusClass}" id="phase-${phase.id}">
+        <div class="phase-header">
+          <h3>${esc(phase.title)}</h3>
+          <span class="badge badge-${statusClass}">${statusBadge}</span>
+        </div>
+        ${phaseDescHTML}
+        <div class="progress-bar-container">
+          <div class="progress-bar" style="width:${pct}%"></div>
+        </div>
+        <div class="phase-stats">${phase.tasks_closed}/${phase.tasks_total} tasks &middot; ${pct}%</div>
+        ${phase.tasks.length > 0 ? `<ul class="task-list">${tasksHTML}</ul>` : '<p class="no-tasks">No tasks</p>'}
+      </div>`;
+  }).join('\n');
+
+  // Build requirement heat map HTML
+  const reqGridHTML = reqCoverage.map(r => {
+    const cls = r.covered ? 'req-covered' : 'req-uncovered';
+    return `<div class="req-cell ${cls}" title="${esc(r.title)} (${r.id})${r.covered ? ' — ' + r.covering_tasks + ' tasks' : ' — UNCOVERED'}">${esc(r.title.length > 30 ? r.title.slice(0, 28) + '…' : r.title)}</div>`;
+  }).join('\n');
+
+  // Build blockers HTML
+  const blockers = [];
+  for (const phase of phaseDetails) {
+    if (phase.status === 'blocked') {
+      blockers.push({ type: 'phase', id: phase.id, title: phase.title });
+    }
+    for (const t of phase.tasks) {
+      if (t.status === 'blocked') {
+        blockers.push({ type: 'task', id: t.id, title: t.title, phase: phase.title });
+      }
+    }
+  }
+  const blockersHTML = blockers.length === 0
+    ? '<p class="no-blockers">No blockers detected</p>'
+    : blockers.map(b => `<div class="blocker-item"><span class="blocker-type">${b.type}</span> <strong>${esc(b.title)}</strong> <code>${b.id}</code>${b.phase ? ` <span class="blocker-phase">in ${esc(b.phase)}</span>` : ''}</div>`).join('\n');
+
+  // Chart.js data
+  const chartData = JSON.stringify({
+    phaseLabels: ['Completed', 'In Progress', 'Open'],
+    phaseValues: [completedPhases, phasesInProgress, phasesOpen],
+    phaseColors: ['#2ecc71', '#f39c12', '#95a5a6'],
+    reqLabels: ['Covered', 'Uncovered'],
+    reqValues: [reqsCovered, reqsTotal - reqsCovered],
+    reqColors: ['#2ecc71', '#e74c3c'],
+  });
+
+  // Sidebar TOC items
+  const tocItems = [
+    { href: '#overview', label: 'Overview' },
+    { href: '#phases', label: 'Phases' },
+    { href: '#requirements', label: 'Requirements' },
+    { href: '#blockers', label: 'Blockers' },
+    { href: '#charts', label: 'Charts' },
+  ];
+  const tocHTML = tocItems.map(t => `<a href="${t.href}">${t.label}</a>`).join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${esc(projectTitle)} — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"><\/script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-2: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #2ecc71;
+    --orange: #f39c12;
+    --red: #e74c3c;
+    --blue: #58a6ff;
+    --sidebar-w: 200px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    display: grid;
+    grid-template-columns: var(--sidebar-w) 1fr;
+    min-height: 100vh;
+  }
+  code, .mono { font-family: 'IBM Plex Mono', monospace; font-size: 0.85em; color: var(--text-muted); }
+
+  /* Sidebar */
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 2rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .sidebar h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 0.5rem; }
+  .sidebar a {
+    display: block;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    transition: all 0.15s;
+  }
+  .sidebar a:hover { color: var(--text); background: var(--surface-2); }
+
+  /* Main */
+  .main { padding: 2.5rem 3rem; width: 100%; }
+  .main h1 { font-size: 1.75rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 2rem; }
+
+  /* Overview */
+  .overview-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2.5rem; }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+  }
+  .stat-card .stat-value { font-size: 2rem; font-weight: 700; line-height: 1; }
+  .stat-card .stat-label { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; }
+  .stat-card.accent .stat-value { color: var(--accent); }
+  .stat-card.green .stat-value { color: var(--green); }
+  .stat-card.orange .stat-value { color: var(--orange); }
+
+  /* Big progress */
+  .big-progress { margin-bottom: 2.5rem; }
+  .big-progress-bar {
+    width: 100%;
+    height: 12px;
+    background: var(--surface-2);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .big-progress-fill { height: 100%; background: linear-gradient(90deg, var(--green), var(--accent)); border-radius: 6px; transition: width 0.5s; }
+  .big-progress-label { text-align: right; font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+  /* Section */
+  section { margin-bottom: 2.5rem; }
+  section h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+
+  /* Phase cards */
+  .phase-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .phase-card.phase-active { border-left: 3px solid var(--orange); }
+  .phase-card.phase-done { border-left: 3px solid var(--green); opacity: 0.8; }
+  .phase-card.phase-pending { border-left: 3px solid var(--border); }
+  .phase-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+  .phase-header h3 { font-size: 1rem; font-weight: 500; }
+  .badge { font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .badge-phase-done { background: rgba(46,204,113,0.15); color: var(--green); }
+  .badge-phase-active { background: rgba(243,156,18,0.15); color: var(--orange); }
+  .badge-phase-pending { background: rgba(139,148,158,0.15); color: var(--text-muted); }
+  .progress-bar-container { width: 100%; height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-bottom: 0.35rem; }
+  .progress-bar { height: 100%; background: var(--accent); border-radius: 2px; }
+  .phase-stats { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+  .task-list { list-style: none; padding: 0; }
+  .task-list li { padding: 0.3rem 0; font-size: 0.85rem; display: flex; align-items: center; gap: 0.5rem; }
+  .task-icon { width: 1.2em; text-align: center; flex-shrink: 0; }
+  .task-done { color: var(--green); }
+  .task-active { color: var(--orange); }
+  .task-pending { color: var(--text-muted); }
+  .no-tasks { color: var(--text-muted); font-size: 0.85rem; font-style: italic; }
+  .phase-desc { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .task-list details summary { cursor: pointer; display: flex; align-items: center; gap: 0.5rem; list-style: none; }
+  .task-list details summary::-webkit-details-marker { display: none; }
+  .task-list details[open] summary { margin-bottom: 0.4rem; }
+  .task-details { margin-left: 1.7rem; padding: 0.5rem 0.75rem; background: var(--surface-2); border-radius: 6px; font-size: 0.8rem; color: var(--text-muted); }
+  .task-details pre { white-space: pre-wrap; font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; margin-top: 0.25rem; }
+  .task-desc, .task-ac { margin-bottom: 0.4rem; }
+  .no-detail summary { cursor: default; }
+
+  /* Requirements heat map */
+  .req-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.5rem; }
+  .req-cell {
+    padding: 0.6rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+  .req-covered { background: rgba(46,204,113,0.12); color: var(--green); border: 1px solid rgba(46,204,113,0.25); }
+  .req-uncovered { background: rgba(231,76,60,0.12); color: var(--red); border: 1px solid rgba(231,76,60,0.25); }
+
+  /* Blockers */
+  .blocker-item {
+    background: rgba(231,76,60,0.08);
+    border: 1px solid rgba(231,76,60,0.2);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+  }
+  .blocker-type { font-size: 0.7rem; text-transform: uppercase; color: var(--red); font-weight: 600; margin-right: 0.5rem; }
+  .blocker-phase { color: var(--text-muted); font-size: 0.8rem; }
+  .no-blockers { color: var(--green); font-size: 0.9rem; }
+
+  /* Charts */
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+  .chart-container { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; }
+  .chart-container h3 { font-size: 0.9rem; font-weight: 500; margin-bottom: 1rem; color: var(--text-muted); }
+  canvas { max-height: 250px; }
+
+  @media (max-width: 768px) {
+    body { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .main { padding: 1.5rem; }
+    .overview-grid { grid-template-columns: repeat(2, 1fr); }
+    .chart-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<nav class="sidebar">
+  <h2>Dashboard</h2>
+  ${tocHTML}
+</nav>
+<main class="main">
+  <h1>${esc(projectTitle)}</h1>
+  <p class="subtitle">Generated ${timestamp} &middot; <code>${projectId}</code></p>
+
+  <div class="big-progress" id="overview">
+    <div class="big-progress-bar"><div class="big-progress-fill" style="width:${progressPercent}%"></div></div>
+    <div class="big-progress-label">${progressPercent}% complete</div>
+  </div>
+
+  <div class="overview-grid">
+    <div class="stat-card accent"><div class="stat-value">${totalPhases}</div><div class="stat-label">Total Phases</div></div>
+    <div class="stat-card green"><div class="stat-value">${completedPhases}</div><div class="stat-label">Completed</div></div>
+    <div class="stat-card orange"><div class="stat-value">${phasesInProgress}</div><div class="stat-label">In Progress</div></div>
+    <div class="stat-card"><div class="stat-value">${reqsTotal}</div><div class="stat-label">Requirements</div></div>
+  </div>
+
+  <section id="phases">
+    <h2>Phases</h2>
+    ${phaseCardsHTML}
+  </section>
+
+  <section id="requirements">
+    <h2>Requirement Coverage (${reqsCovered}/${reqsTotal})</h2>
+    ${reqsTotal > 0 ? `<div class="req-grid">${reqGridHTML}</div>` : '<p style="color:var(--text-muted)">No requirements defined</p>'}
+  </section>
+
+  <section id="blockers">
+    <h2>Blockers</h2>
+    ${blockersHTML}
+  </section>
+
+  <section id="charts">
+    <h2>Charts</h2>
+    <div class="chart-grid">
+      <div class="chart-container">
+        <h3>Phase Status</h3>
+        <canvas id="phaseChart"></canvas>
+      </div>
+      <div class="chart-container">
+        <h3>Requirement Coverage</h3>
+        <canvas id="reqChart"></canvas>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+  const d = ${chartData};
+  const chartOpts = { responsive: true, plugins: { legend: { labels: { color: '#e6edf3', font: { family: 'IBM Plex Sans' } } } } };
+  new Chart(document.getElementById('phaseChart'), {
+    type: 'doughnut',
+    data: { labels: d.phaseLabels, datasets: [{ data: d.phaseValues, backgroundColor: d.phaseColors, borderWidth: 0 }] },
+    options: chartOpts,
+  });
+  new Chart(document.getElementById('reqChart'), {
+    type: 'doughnut',
+    data: { labels: d.reqLabels, datasets: [{ data: d.reqValues, backgroundColor: d.reqColors, borderWidth: 0 }] },
+    options: chartOpts,
+  });
+<\/script>
+</body>
+</html>`;
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // --- Commands ---
 
 const commands = {
@@ -821,7 +1155,7 @@ const commands = {
 
     // Also store in bd remember for fast lookup
     const memoryKey = `forge:checkpoint:${phaseId}`;
-    bdArgs(['remember', checkpointJson, '--key', memoryKey], { allowFail: true });
+    bdArgs(['remember', '--key', memoryKey, checkpointJson], { allowFail: true });
 
     output({ saved: true, phaseId, checkpoint });
   },
@@ -957,6 +1291,100 @@ const commands = {
   },
 
   /**
+   * Generate a self-contained HTML dashboard for a project.
+   * Writes to .forge/forge-dashboard-<project-id>.html (CWD) and returns the path.
+   */
+  'generate-dashboard'(args) {
+    const projectId = args[0];
+    if (!projectId) {
+      console.error('Usage: forge-tools generate-dashboard <project-bead-id>');
+      process.exit(1);
+    }
+
+    // Reuse full-progress logic inline
+    const project = bdJson(`show ${projectId}`);
+    const children = bdJson(`children ${projectId}`);
+    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+
+    const requirements = issues.filter(i =>
+      (i.labels || []).includes('forge:req') || i.issue_type === 'feature'
+    );
+    const phases = issues.filter(i =>
+      (i.labels || []).includes('forge:phase')
+    );
+
+    const phaseDetails = [];
+    for (const phase of phases) {
+      const phaseChildren = bdJson(`children ${phase.id}`);
+      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      phaseDetails.push({
+        id: phase.id,
+        title: phase.title,
+        description: phase.description || '',
+        status: phase.status,
+        tasks_total: tasks.length,
+        tasks_open: tasks.filter(t => t.status === 'open').length,
+        tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
+        tasks_closed: tasks.filter(t => t.status === 'closed').length,
+        tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, description: t.description || '', acceptance_criteria: t.acceptance_criteria || '' })),
+      });
+    }
+
+    // Sort phases by number extracted from title (e.g., "Phase 9.1" -> 9.1)
+    phaseDetails.sort((a, b) => {
+      const numA = parseFloat((a.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
+      const numB = parseFloat((b.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
+      return numA - numB;
+    });
+
+    const reqCoverage = [];
+    for (const req of requirements) {
+      const depsRaw = bd(`dep list ${req.id} --type validates --json`, { allowFail: true });
+      let deps = [];
+      if (depsRaw) { try { deps = JSON.parse(depsRaw); } catch { /* ignore */ } }
+      reqCoverage.push({
+        id: req.id,
+        title: req.title,
+        covered: Array.isArray(deps) && deps.length > 0,
+        covering_tasks: Array.isArray(deps) ? deps.length : 0,
+      });
+    }
+
+    const totalPhases = phases.length;
+    const completedPhases = phases.filter(p => p.status === 'closed').length;
+    const phasesInProgress = phases.filter(p => p.status === 'in_progress');
+    const blockedPhases = phases.filter(p => p.status === 'blocked');
+    const progressPercent = totalPhases > 0 ? Math.round((completedPhases / totalPhases) * 100) : 0;
+
+    const projectTitle = project?.title || projectId;
+    const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z/, ' UTC');
+
+    // Build the data object for the template
+    const data = {
+      projectTitle,
+      projectId,
+      timestamp,
+      progressPercent,
+      totalPhases,
+      completedPhases,
+      phasesInProgress,
+      blockedPhases,
+      phaseDetails,
+      reqCoverage,
+    };
+
+    const html = generateDashboardHTML(data);
+
+    // Write file to .forge/ in CWD (gitignored by default)
+    const diagDir = path.join(process.cwd(), '.forge');
+    fs.mkdirSync(diagDir, { recursive: true });
+    const filePath = path.join(diagDir, `forge-dashboard-${projectId}.html`);
+    fs.writeFileSync(filePath, html, 'utf8');
+
+    output({ path: filePath, projectId, timestamp });
+  },
+
+  /**
    * Save session state for forge:pause.
    * Captures current phase, in-progress tasks, and notes into bd remember.
    */
@@ -1001,7 +1429,7 @@ const commands = {
     // Save structured session state
     const memoryKey = `forge:session:state`;
     const memoryValue = `${timestamp} project=${projectId} phase=${sessionData.current_phase || 'none'} progress=${completedPhases}/${phases.length} in_flight=${inProgressTasks.map(t => t.id).join(',')}`;
-    bd(`remember "${memoryKey} ${memoryValue}"`);
+    bdArgs(['remember', '--key', memoryKey, memoryValue], { allowFail: true });
 
     output({ saved: true, session: sessionData });
   },
@@ -2921,6 +3349,262 @@ const commands = {
     } catch (err) {
       output({ created: false, error: err.message, branch, base });
     }
+  },
+
+  /**
+   * Write structured agent context to a phase bead as a JSON comment.
+   * Usage: forge-tools context-write <phase-id> <json-string>
+   *
+   * JSON schema fields:
+   *   agent    (string, required) - agent name (e.g. "forge-executor", "forge-researcher")
+   *   task     (string, optional) - task bead ID
+   *   status   (string, required) - "completed" | "blocked" | "in_progress"
+   *   findings (array of strings, optional) - key discoveries
+   *   decisions (array of strings, optional) - choices made
+   *   blockers (array of strings, optional) - blocking issues
+   *   artifacts (array of strings, optional) - files created/modified
+   *   next_steps (array of strings, optional) - suggested follow-ups
+   */
+  'context-write'(args) {
+    const phaseId = args[0];
+    const jsonStr = args.slice(1).join(' ');
+    if (!phaseId || !jsonStr) {
+      console.error('Usage: forge-tools context-write <phase-id> <json-string>');
+      process.exit(1);
+    }
+
+    let ctx;
+    try {
+      ctx = JSON.parse(jsonStr);
+    } catch {
+      console.error('Invalid JSON input');
+      process.exit(1);
+    }
+
+    // Validate required fields
+    if (!ctx.agent || !ctx.status) {
+      console.error('Required fields: agent, status');
+      process.exit(1);
+    }
+
+    // Build context entry: required fields + known arrays + any extra fields passed through
+    const schema = {
+      agent: ctx.agent,
+      task: ctx.task || null,
+      status: ctx.status,
+      findings: ctx.findings || [],
+      decisions: ctx.decisions || [],
+      blockers: ctx.blockers || [],
+      artifacts: ctx.artifacts || [],
+      next_steps: ctx.next_steps || [],
+      timestamp: new Date().toISOString(),
+    };
+
+    // Pass through extra fields (e.g. retro data: task_count, approach_effectiveness, etc.)
+    const knownKeys = new Set(Object.keys(schema));
+    for (const [k, v] of Object.entries(ctx)) {
+      if (!knownKeys.has(k)) schema[k] = v;
+    }
+
+    // Write to temp file to avoid shell escaping issues
+    const tmpFile = path.join(os.tmpdir(), `forge-ctx-${Date.now()}.json`);
+    fs.writeFileSync(tmpFile, JSON.stringify(schema, null, 2));
+
+    try {
+      bdArgs(['comments', 'add', phaseId, '-f', tmpFile]);
+      output({ written: true, phaseId, agent: schema.agent, task: schema.task });
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch {}
+    }
+  },
+
+  /**
+   * Read all structured JSON context comments from a phase bead.
+   * Usage: forge-tools context-read <phase-id>
+   *
+   * Filters out non-JSON comments and returns only valid structured context entries.
+   */
+  'context-read'(args) {
+    const phaseId = args[0];
+    if (!phaseId) {
+      console.error('Usage: forge-tools context-read <phase-id>');
+      process.exit(1);
+    }
+
+    const comments = bdJson(`comments ${phaseId}`);
+    if (!comments) {
+      output({ phaseId, contexts: [] });
+      return;
+    }
+
+    const list = Array.isArray(comments) ? comments : (comments.comments || []);
+    const contexts = [];
+
+    for (const c of list) {
+      const body = c.body || c.content || c.text || '';
+      try {
+        const parsed = JSON.parse(body);
+        // Must have agent and status to be a valid context entry
+        if (parsed.agent && parsed.status) {
+          contexts.push(parsed);
+        }
+      } catch {
+        // Not JSON — skip (free-text comment)
+      }
+    }
+
+    output({ phaseId, contexts });
+  },
+
+  /**
+   * Find similar closed phases and return their retro data (from forge-verifier context entries).
+   * Usage: forge-tools retro-query <phase-id>
+   *
+   * Algorithm:
+   *   1. Find parent project via dep list (up, parent-child).
+   *   2. Get all children of the project, filter to closed forge:phase siblings.
+   *   3. For each sibling, read context comments filtered to agent=="forge-verifier".
+   *   4. Score similarity via Jaccard index on keywords from title+description.
+   *   5. Return top 3 with retro data; exclude phases with no retro entries.
+   */
+  'retro-query'(args) {
+    const phaseId = args[0];
+    if (!phaseId) {
+      console.error('Usage: forge-tools retro-query <phase-id>');
+      process.exit(1);
+    }
+
+    // Common English stop-words to strip before keyword extraction
+    const STOP_WORDS = new Set([
+      'the','a','an','is','are','was','were','in','on','at','to','for','of',
+      'and','or','but','with','from','by','as','this','that','it','be','have',
+      'do','not','will','can','all','each','which','their','there','has','had',
+      'its','if','so','we','our','they','them','he','she','his','her','my','your',
+      'into','about','after','before','more','also','up','out','no','than','then',
+      'when','where','what','how','been','would','could','should','may','might',
+      'use','used','using','new','add','adds','added','get','set','run','make',
+    ]);
+
+    function extractKeywords(text) {
+      if (!text) return new Set();
+      return new Set(
+        text.toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, ' ')
+          .split(/\s+/)
+          .map(w => w.replace(/^-+|-+$/g, ''))
+          .filter(w => w.length > 2 && !STOP_WORDS.has(w))
+      );
+    }
+
+    function jaccardSimilarity(setA, setB) {
+      if (setA.size === 0 && setB.size === 0) return 0;
+      const intersection = new Set([...setA].filter(x => setB.has(x)));
+      const union = new Set([...setA, ...setB]);
+      return intersection.size / union.size;
+    }
+
+    function readRetroEntries(id) {
+      const comments = bdJson(`comments ${id}`);
+      if (!comments) return [];
+      const list = Array.isArray(comments) ? comments : (comments.comments || []);
+      const entries = [];
+      for (const c of list) {
+        const body = c.body || c.content || c.text || '';
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed.agent === 'forge-verifier' && parsed.status) {
+            entries.push(parsed);
+          }
+        } catch {
+          // skip non-JSON
+        }
+      }
+      return entries;
+    }
+
+    // 1. Get query phase details
+    const queryPhaseRaw = bdJson(`show ${phaseId}`);
+    const queryPhase = Array.isArray(queryPhaseRaw) ? queryPhaseRaw[0] : queryPhaseRaw;
+    if (!queryPhase) {
+      console.error(`Phase not found: ${phaseId}`);
+      process.exit(1);
+    }
+
+    // 2. Find parent project via dep list (direction=up, type=parent-child)
+    let projectId = queryPhase.parent || null;
+    if (!projectId) {
+      const depsRaw = bd(`dep list ${phaseId} --direction up --type parent-child --json`, { allowFail: true });
+      if (depsRaw) {
+        try {
+          const deps = JSON.parse(depsRaw);
+          const parentDep = Array.isArray(deps) ? deps[0] : null;
+          if (parentDep) {
+            projectId = parentDep.from_id || parentDep.source_id || parentDep.id;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    if (!projectId) {
+      output({
+        query_phase: { id: phaseId, title: queryPhase.title },
+        similar_phases: [],
+        note: 'Could not determine parent project',
+      });
+      return;
+    }
+
+    // 3. Get all sibling phases (children of parent project, closed, forge:phase label)
+    const projectChildren = bdJson(`children ${projectId}`);
+    const allChildren = Array.isArray(projectChildren)
+      ? projectChildren
+      : (projectChildren?.issues || projectChildren?.children || []);
+
+    const siblingPhases = allChildren.filter(child =>
+      child.id !== phaseId &&
+      child.status === 'closed' &&
+      (child.labels || []).includes('forge:phase')
+    );
+
+    // 4. Extract query phase keywords
+    const queryText = `${queryPhase.title || ''} ${queryPhase.description || queryPhase.body || ''}`;
+    const queryKeywords = extractKeywords(queryText);
+
+    // 5. Score each sibling, read retro data, filter out phases with no retro entries
+    const scored = [];
+    for (const sibling of siblingPhases) {
+      const retroEntries = readRetroEntries(sibling.id);
+      if (retroEntries.length === 0) continue; // exclude phases with no retro data
+
+      const siblingText = `${sibling.title || ''} ${sibling.description || sibling.body || ''}`;
+      const siblingKeywords = extractKeywords(siblingText);
+      const similarity = jaccardSimilarity(queryKeywords, siblingKeywords);
+
+      // Consolidate retro entries into a single retro object
+      const retro = {
+        entries: retroEntries,
+        findings: retroEntries.flatMap(e => e.findings || []),
+        decisions: retroEntries.flatMap(e => e.decisions || []),
+        blockers: retroEntries.flatMap(e => e.blockers || []),
+        next_steps: retroEntries.flatMap(e => e.next_steps || []),
+      };
+
+      scored.push({
+        phase_id: sibling.id,
+        title: sibling.title,
+        similarity_score: Math.round(similarity * 1000) / 1000,
+        retro,
+      });
+    }
+
+    // 6. Sort descending, top 3
+    scored.sort((a, b) => b.similarity_score - a.similarity_score);
+    const top3 = scored.slice(0, 3);
+
+    output({
+      query_phase: { id: phaseId, title: queryPhase.title },
+      similar_phases: top3,
+    });
   },
 };
 
