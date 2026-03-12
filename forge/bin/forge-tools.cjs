@@ -3387,7 +3387,7 @@ const commands = {
       process.exit(1);
     }
 
-    // Normalize optional array fields
+    // Build context entry: required fields + known arrays + any extra fields passed through
     const schema = {
       agent: ctx.agent,
       task: ctx.task || null,
@@ -3399,6 +3399,12 @@ const commands = {
       next_steps: ctx.next_steps || [],
       timestamp: new Date().toISOString(),
     };
+
+    // Pass through extra fields (e.g. retro data: task_count, approach_effectiveness, etc.)
+    const knownKeys = new Set(Object.keys(schema));
+    for (const [k, v] of Object.entries(ctx)) {
+      if (!knownKeys.has(k)) schema[k] = v;
+    }
 
     // Write to temp file to avoid shell escaping issues
     const tmpFile = path.join(os.tmpdir(), `forge-ctx-${Date.now()}.json`);
