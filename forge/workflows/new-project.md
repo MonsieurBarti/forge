@@ -60,7 +60,28 @@ Save the vision as a memory:
 bd remember --key "forge:project:<id>:vision" "<one-line vision>"
 ```
 
-## 4. Define Requirements
+## 4. Create Default Milestone
+
+Create a default milestone as a child of the project so that phases have a milestone to attach to:
+
+```bash
+bd create --title="Milestone 1" \
+  --description="Initial milestone for the project. Covers the first set of phases toward v1." \
+  --type=epic --priority=1 --json
+```
+
+Label and wire it:
+```bash
+bd label add <milestone-id> forge:milestone
+bd dep add <milestone-id> <project-id> --type=parent-child
+```
+
+Save for future reference:
+```bash
+bd remember --key "forge:session:last-milestone" "<milestone-id>"
+```
+
+## 5. Define Requirements
 
 Based on the user's v1 description, break it down into 5-12 concrete requirements.
 
@@ -84,7 +105,7 @@ bd dep add <req-id> <project-id> --type=parent-child
 bd label add <req-id> forge:req
 ```
 
-## 5. Create Phased Roadmap
+## 6. Create Phased Roadmap
 
 Resolve the model for the roadmapper agent:
 ```bash
@@ -92,7 +113,7 @@ MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-roadm
 ```
 
 Use the Agent tool to spawn **forge-roadmapper** with (pass `model` if non-empty):
-- The project ID and vision
+- The project ID, milestone ID (Milestone 1), and vision
 - All requirement IDs with their titles and descriptions
 - Any user-specified constraints on ordering
 
@@ -114,7 +135,7 @@ bd search "<Phase N: phase name>" --label forge:phase --status all --json
 bd create --title="Phase N: <phase name>" \
   --description="<phase goal and what it achieves>" \
   --type=epic --priority=1 --json
-bd dep add <phase-id> <project-id> --type=parent-child
+bd dep add <phase-id> <milestone-id> --type=parent-child
 bd label add <phase-id> forge:phase
 
 # Wire phase ordering (each phase blocks the next):
@@ -123,7 +144,7 @@ bd dep add <phase-3-id> <phase-2-id>  # phase 3 depends on phase 2
 # etc.
 ```
 
-## 6. Show Roadmap
+## 7. Show Roadmap
 
 Display the full project structure:
 ```bash
@@ -132,8 +153,9 @@ bd dep tree <project-id>
 
 Summarize:
 - Project vision (one sentence)
+- Default milestone created (Milestone 1)
 - N requirements defined
-- N phases planned
+- N phases planned under Milestone 1
 - Phase overview (numbered list with titles)
 - Next step: `/forge:plan` to plan the first phase
 
