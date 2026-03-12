@@ -130,14 +130,12 @@ Present the proposed phases to the user for review. Let them reorder, merge, spl
 
 Then create the approved phases:
 ```bash
-# Use forge-tools for each phase (handles numbering and wiring):
-node "$HOME/.claude/forge/bin/forge-tools.cjs" add-phase <project-id> <phase-description>
+# Use forge-tools for each phase (handles numbering, validation, and wiring):
+node "$HOME/.claude/forge/bin/forge-tools.cjs" add-phase <project-id> <milestone-id> <phase-description>
 ```
 
-Wire each phase to the milestone:
-```bash
-bd dep add <phase-id> <milestone-id> --type=parent-child
-```
+This automatically wires each phase as a child of the milestone (parent-child dependency).
+No separate wiring step needed.
 
 ## 8. Show Summary
 

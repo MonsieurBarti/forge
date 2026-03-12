@@ -1767,25 +1767,42 @@ const commands = {
 
   /**
    * Add a new phase to the end of a project's phase list.
-   * Creates the phase epic, wires parent-child and blocks dependencies.
-   * Usage: forge-tools add-phase <project-id> <description>
+   * Creates the phase epic, wires parent-child to milestone and blocks dependencies.
+   * Usage: forge-tools add-phase <project-id> <milestone-id> <description>
    */
   'add-phase'(args) {
     const projectId = args[0];
-    const description = args.slice(1).join(' ');
-    if (!projectId || !description) {
-      console.error('Usage: forge-tools add-phase <project-id> <description>');
+    const milestoneId = args[1];
+    const description = args.slice(2).join(' ');
+    if (!projectId || !milestoneId || !description) {
+      console.error('Usage: forge-tools add-phase <project-id> <milestone-id> <description>');
       process.exit(1);
     }
 
-    // Get existing phases
-    const children = bdJson(`children ${projectId}`);
+    // Validate milestone exists and is not closed
+    const milestone = bdJson(`show ${milestoneId}`);
+    if (!milestone || !milestone.id) {
+      console.error(`ERROR: Milestone '${milestoneId}' not found.`);
+      process.exit(1);
+    }
+    if (milestone.status === 'closed') {
+      console.error(`ERROR: Milestone '${milestoneId}' is closed. Phases can only be added to active milestones.`);
+      process.exit(1);
+    }
+
+    // Get existing phases under milestone
+    const children = bdJson(`children ${milestoneId}`);
     const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
-    // Determine next phase number from titles
+    // Also check project-level phases for numbering continuity
+    const projectChildren = bdJson(`children ${projectId}`);
+    const projectIssues = Array.isArray(projectChildren) ? projectChildren : (projectChildren?.issues || projectChildren?.children || []);
+    const allPhases = projectIssues.filter(i => (i.labels || []).includes('forge:phase'));
+
+    // Determine next phase number from all project phases
     let maxPhaseNum = 0;
-    for (const phase of phases) {
+    for (const phase of allPhases) {
       const match = (phase.title || '').match(/^Phase\s+(\d+)/i);
       if (match) {
         const num = parseInt(match[1], 10);
@@ -1802,14 +1819,13 @@ const commands = {
       process.exit(1);
     }
 
-    // Add parent-child link to project
-    bd(`dep add ${created.id} ${projectId} --type=parent-child`);
+    // Add parent-child link to milestone
+    bd(`dep add ${created.id} ${milestoneId} --type=parent-child`);
     // Add forge:phase label
     bd(`label add ${created.id} forge:phase`);
 
-    // Wire ordering: new phase depends on the last existing phase
+    // Wire ordering: new phase depends on the last existing phase under this milestone
     if (phases.length > 0) {
-      // Find the last phase (highest number or last in blocks chain)
       let lastPhase = null;
       let lastNum = 0;
       for (const phase of phases) {
@@ -1834,6 +1850,7 @@ const commands = {
       title,
       description,
       project_id: projectId,
+      milestone_id: milestoneId,
       total_phases: phases.length + 1,
     });
   },

@@ -99,18 +99,16 @@ If "adjust": Get feedback, revise plan, re-present.
 
 ## 6. Create Gap Closure Phases
 
-For each approved phase, use forge-tools to handle numbering and wiring:
+For each approved phase, use forge-tools to handle numbering, validation, and wiring:
 
 ```bash
-RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" add-phase <project-id> "<phase-description>")
+RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" add-phase <project-id> <milestone-id> "<phase-description>")
 ```
 
 Extract the phase ID from the result.
 
-Wire each new phase to the milestone:
-```bash
-bd dep add <phase-id> <milestone-id> --type=parent-child
-```
+The phase is automatically wired as a child of the milestone (parent-child dependency).
+No separate wiring step needed.
 
 Update the phase description with gap context:
 ```bash

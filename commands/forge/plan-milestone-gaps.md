@@ -19,7 +19,7 @@ Execute the plan-milestone-gaps workflow from @~/.claude/forge/workflows/plan-mi
 
 When creating gap closure phases (step 5), use:
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" add-phase <project-id> <description>
+node "$HOME/.claude/forge/bin/forge-tools.cjs" add-phase <project-id> <milestone-id> <description>
 ```
-This handles phase numbering, parent-child wiring, and ordering dependencies automatically.
+This handles milestone validation, phase numbering, parent-child wiring to the milestone, and ordering dependencies automatically.
 </execution_context>
