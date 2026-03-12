@@ -78,6 +78,22 @@ Resolve the model for the researcher agent:
 MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-researcher --raw)
 ```
 
+Before spawning the researcher, query for retrospective data from similar past phases:
+```bash
+RETRO=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" retro-query <phase-id>)
+```
+
+Parse the JSON result. If `similar_phases` is non-empty, build a `RETRO_SECTION` string:
+```
+Past phase retrospectives (similar phases):
+<for each similar phase>
+- Phase: <title> (effectiveness: <approach_effectiveness>/5, blockers: <blocker_count>)
+  Key lessons: <key_lessons joined by "; ">
+</for each>
+```
+
+If `similar_phases` is empty or the command fails, set `RETRO_SECTION` to empty string.
+
 Otherwise, spawn a **forge-researcher** agent to investigate the implementation approach:
 
 ```
@@ -89,10 +105,12 @@ Goal: <phase description>
 Project context: <project vision, relevant requirements>
 Codebase: Read the current codebase to understand existing patterns.
 
+<if RETRO_SECTION is non-empty, include it here verbatim>
+
 Produce a concise research summary covering:
 1. Recommended approach
 2. Key patterns/libraries to use
-3. Potential pitfalls
+3. Potential pitfalls (check retrospective data above for known issues)
 4. Estimated complexity
 
 Write your findings as a structured JSON context comment on the phase bead:
