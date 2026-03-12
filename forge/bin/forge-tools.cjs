@@ -3449,6 +3449,157 @@ const commands = {
 
     output({ phaseId, contexts });
   },
+
+  /**
+   * Find similar closed phases and return their retro data (from forge-verifier context entries).
+   * Usage: forge-tools retro-query <phase-id>
+   *
+   * Algorithm:
+   *   1. Find parent project via dep list (up, parent-child).
+   *   2. Get all children of the project, filter to closed forge:phase siblings.
+   *   3. For each sibling, read context comments filtered to agent=="forge-verifier".
+   *   4. Score similarity via Jaccard index on keywords from title+description.
+   *   5. Return top 3 with retro data; exclude phases with no retro entries.
+   */
+  'retro-query'(args) {
+    const phaseId = args[0];
+    if (!phaseId) {
+      console.error('Usage: forge-tools retro-query <phase-id>');
+      process.exit(1);
+    }
+
+    // Common English stop-words to strip before keyword extraction
+    const STOP_WORDS = new Set([
+      'the','a','an','is','are','was','were','in','on','at','to','for','of',
+      'and','or','but','with','from','by','as','this','that','it','be','have',
+      'do','not','will','can','all','each','which','their','there','has','had',
+      'its','if','so','we','our','they','them','he','she','his','her','my','your',
+      'into','about','after','before','more','also','up','out','no','than','then',
+      'when','where','what','how','been','would','could','should','may','might',
+      'use','used','using','new','add','adds','added','get','set','run','make',
+    ]);
+
+    function extractKeywords(text) {
+      if (!text) return new Set();
+      return new Set(
+        text.toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, ' ')
+          .split(/\s+/)
+          .map(w => w.replace(/^-+|-+$/g, ''))
+          .filter(w => w.length > 2 && !STOP_WORDS.has(w))
+      );
+    }
+
+    function jaccardSimilarity(setA, setB) {
+      if (setA.size === 0 && setB.size === 0) return 0;
+      const intersection = new Set([...setA].filter(x => setB.has(x)));
+      const union = new Set([...setA, ...setB]);
+      return intersection.size / union.size;
+    }
+
+    function readRetroEntries(id) {
+      const comments = bdJson(`comments ${id}`);
+      if (!comments) return [];
+      const list = Array.isArray(comments) ? comments : (comments.comments || []);
+      const entries = [];
+      for (const c of list) {
+        const body = c.body || c.content || c.text || '';
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed.agent === 'forge-verifier' && parsed.status) {
+            entries.push(parsed);
+          }
+        } catch {
+          // skip non-JSON
+        }
+      }
+      return entries;
+    }
+
+    // 1. Get query phase details
+    const queryPhaseRaw = bdJson(`show ${phaseId}`);
+    const queryPhase = Array.isArray(queryPhaseRaw) ? queryPhaseRaw[0] : queryPhaseRaw;
+    if (!queryPhase) {
+      console.error(`Phase not found: ${phaseId}`);
+      process.exit(1);
+    }
+
+    // 2. Find parent project via dep list (direction=up, type=parent-child)
+    let projectId = queryPhase.parent || null;
+    if (!projectId) {
+      const depsRaw = bd(`dep list ${phaseId} --direction up --type parent-child --json`, { allowFail: true });
+      if (depsRaw) {
+        try {
+          const deps = JSON.parse(depsRaw);
+          const parentDep = Array.isArray(deps) ? deps[0] : null;
+          if (parentDep) {
+            projectId = parentDep.from_id || parentDep.source_id || parentDep.id;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    if (!projectId) {
+      output({
+        query_phase: { id: phaseId, title: queryPhase.title },
+        similar_phases: [],
+        note: 'Could not determine parent project',
+      });
+      return;
+    }
+
+    // 3. Get all sibling phases (children of parent project, closed, forge:phase label)
+    const projectChildren = bdJson(`children ${projectId}`);
+    const allChildren = Array.isArray(projectChildren)
+      ? projectChildren
+      : (projectChildren?.issues || projectChildren?.children || []);
+
+    const siblingPhases = allChildren.filter(child =>
+      child.id !== phaseId &&
+      child.status === 'closed' &&
+      (child.labels || []).includes('forge:phase')
+    );
+
+    // 4. Extract query phase keywords
+    const queryText = `${queryPhase.title || ''} ${queryPhase.description || queryPhase.body || ''}`;
+    const queryKeywords = extractKeywords(queryText);
+
+    // 5. Score each sibling, read retro data, filter out phases with no retro entries
+    const scored = [];
+    for (const sibling of siblingPhases) {
+      const retroEntries = readRetroEntries(sibling.id);
+      if (retroEntries.length === 0) continue; // exclude phases with no retro data
+
+      const siblingText = `${sibling.title || ''} ${sibling.description || sibling.body || ''}`;
+      const siblingKeywords = extractKeywords(siblingText);
+      const similarity = jaccardSimilarity(queryKeywords, siblingKeywords);
+
+      // Consolidate retro entries into a single retro object
+      const retro = {
+        entries: retroEntries,
+        findings: retroEntries.flatMap(e => e.findings || []),
+        decisions: retroEntries.flatMap(e => e.decisions || []),
+        blockers: retroEntries.flatMap(e => e.blockers || []),
+        next_steps: retroEntries.flatMap(e => e.next_steps || []),
+      };
+
+      scored.push({
+        phase_id: sibling.id,
+        title: sibling.title,
+        similarity_score: Math.round(similarity * 1000) / 1000,
+        retro,
+      });
+    }
+
+    // 6. Sort descending, top 3
+    scored.sort((a, b) => b.similarity_score - a.similarity_score);
+    const top3 = scored.slice(0, 3);
+
+    output({
+      query_phase: { id: phaseId, title: queryPhase.title },
+      similar_phases: top3,
+    });
+  },
 };
 
 // --- Main ---
