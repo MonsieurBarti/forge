@@ -15,7 +15,18 @@ CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id
 
 Verify phase is `in_progress` (has been planned). If not planned, suggest `/forge:plan` first.
 
-## 2. Preflight Check
+## 2. Load Checkpoint
+
+Check for an existing checkpoint from a previous interrupted session:
+
+```bash
+CHECKPOINT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" checkpoint-load <phase-id>)
+```
+
+If the checkpoint contains `completedWaves`, note which waves have already been executed.
+These will be skipped during wave execution in step 5.
+
+## 3. Preflight Check
 
 Run the preflight-check command to validate the phase is ready for execution:
 
@@ -28,7 +39,7 @@ to the user and **abort execution**. Do not proceed to wave detection or task ex
 
 If `verdict` is `PASS`, continue to the next step.
 
-## 3. Detect Waves
+## 4. Detect Waves
 
 Use the detect-waves tool to automatically group tasks by dependency order:
 
@@ -46,7 +57,7 @@ the phase is already complete — skip to step 4.
 If the output contains `circular_or_external_dependency`, report the cycle and ask the user
 how to proceed.
 
-## 4. Execute Waves
+## 5. Execute Waves
 
 Before executing, resolve the model for the executor agent:
 ```bash
@@ -59,6 +70,14 @@ For each wave, in order:
 ### Wave N Execution
 
 Skip waves where `tasks_to_execute` is empty (all tasks already done).
+
+If a checkpoint was loaded in step 2 and this wave number is in `completedWaves`,
+skip it (already completed in a previous session).
+
+Before dispatching tasks, save a checkpoint:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" checkpoint-save <phase-id> '{"phaseId":"<phase-id>","completedWaves":[<previously completed wave numbers>],"currentWave":<N>,"taskStatuses":{<taskId>:<status>,...},"timestamp":"<ISO timestamp>"}'
+```
 
 For tasks in this wave that are `open` or `in_progress`:
 
@@ -108,7 +127,7 @@ Review the updated task statuses:
   - Fix the issue inline (if quick)
   - Stop execution and report (if the blocker affects downstream waves)
 
-## 5. Phase Completion Check
+## 6. Phase Completion Check
 
 After all waves complete:
 ```bash
@@ -117,13 +136,14 @@ PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 
 If all tasks are closed:
 ```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" checkpoint-save <phase-id> '{"phaseId":"<phase-id>","completedWaves":[<all wave numbers>],"taskStatuses":{<all tasks>:"closed"},"timestamp":"<ISO timestamp>","completed":true}'
 bd close <phase-id> --reason="All tasks completed"
 bd remember "forge:phase:<id>:completed $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
 If some tasks remain open, report what's left and suggest next steps.
 
-## 6. Suggest Next Step
+## 7. Suggest Next Step
 
 - If phase complete: `/forge:verify <phase>` to verify, or `/forge:plan <next-phase>`
 - If tasks remaining: fix blockers, then `/forge:execute <phase>` again
