@@ -67,12 +67,47 @@ bd update <task-id> --notes="UAT feedback: <user's feedback>"
 
 ## 5. Update Phase Status
 
-If all tasks verified:
+### Hard Gate: Block Closure on Failed Verification
+
+Before calling `bd close` on any task or the phase, tally the verification verdicts from
+Step 3 and Step 4.
+
+**If any task has a verdict of FAIL** (either from automated checks or UAT rejection),
+the workflow MUST NOT call `bd close` on those tasks or the phase — unless the user
+explicitly passed `--force`.
+
+Output the following blocking message and stop:
+
+```
+------------------------------------------------------------
+ Closure blocked: N task(s) failed verification.
+------------------------------------------------------------
+
+The following task(s) did not pass verification:
+  - <task-title> (<task-id>): <reason>
+
+Next steps:
+  1. Fix the failing tasks and re-run /forge:verify <phase>
+  2. Or pass --force to override and close despite failures (not recommended)
+------------------------------------------------------------
+```
+
+**If --force was passed**, close despite failures but emit a clear warning first:
+
+```
+WARNING: Closing phase despite N failed task(s) — --force override in effect.
+```
+
+Then proceed with closure as normal.
+
+### Normal Closure (all tasks verified or --force)
+
+If all tasks verified (or --force override):
 ```bash
 bd close <phase-id> --reason="All tasks verified via UAT"
 ```
 
-If some tasks need rework:
+If some tasks need rework (no --force):
 - Keep phase as `in_progress`
 - Report which tasks need attention
 - Suggest `/forge:execute <phase>` to redo failed tasks
