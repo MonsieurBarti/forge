@@ -50,8 +50,17 @@ Based on the user's v1 description, break it down into 5-12 concrete requirement
 
 Present the full list to the user for review before creating any beads. Let them add, remove, or modify requirements. Iterate until they approve.
 
-For each approved requirement:
+For each approved requirement, check if a bead with the same title already exists before creating:
 ```bash
+# Check for existing bead with this title (label forge:req)
+bd search "<requirement title>" --label forge:req --status all --json
+```
+
+- If a match with the exact title is found: skip creation, note "Skipping '<title>' — already exists as <id>", and use the existing ID for any dependency wiring.
+- If no match: create normally.
+
+```bash
+# Only run if no existing match:
 bd create --title="<requirement title>" \
   --description="<what this requirement means and why it matters>" \
   --type=feature --priority=<1-3> --json
@@ -75,9 +84,17 @@ The roadmapper will analyze requirements and propose 3-8 phases.
 
 Present the proposed phases to the user for review. Let them reorder, merge, split, or rename phases. Iterate until they approve.
 
-Then create the approved phases:
+Then create the approved phases. For each phase, check if a bead with the same title already exists before creating:
 ```bash
-# For each phase:
+# Check for existing bead with this title (label forge:phase)
+bd search "<Phase N: phase name>" --label forge:phase --status all --json
+```
+
+- If a match with the exact title is found: skip creation, note "Skipping '<title>' — already exists as <id>", and use the existing ID for dependency wiring.
+- If no match: create normally.
+
+```bash
+# Only run if no existing match:
 bd create --title="Phase N: <phase name>" \
   --description="<phase goal and what it achieves>" \
   --type=epic --priority=1 --json
