@@ -140,8 +140,29 @@ function writeFrontmatter(filePath, data, body) {
 
 // --- Helpers ---
 
+function isDoltConnectionError(err) {
+  const msg = (err.message || '') + (err.stderr || '');
+  return /connection refused|dial tcp|dolt.*not running|unable to connect|connection reset|EOF/i.test(msg);
+}
+
+function restartDolt() {
+  try {
+    execFileSync('bd', ['dolt', 'start'], {
+      encoding: 'utf8',
+      timeout: 15000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    // Give Dolt a moment to become ready
+    const start = Date.now();
+    while (Date.now() - start < 2000) { /* spin-wait */ }
+  } catch (_) {
+    // Ignore restart errors; the retry will surface the real failure
+  }
+}
+
 function bd(args, opts = {}) {
   const argList = args.split(/\s+/);
+  const _retry = opts._retry || false;
   try {
     const result = execFileSync('bd', argList, {
       encoding: 'utf8',
@@ -151,12 +172,17 @@ function bd(args, opts = {}) {
     });
     return result.trim();
   } catch (err) {
+    if (!_retry && isDoltConnectionError(err)) {
+      restartDolt();
+      return bd(args, { ...opts, _retry: true });
+    }
     if (opts.allowFail) return '';
     throw err;
   }
 }
 
 function bdArgs(argList, opts = {}) {
+  const _retry = opts._retry || false;
   try {
     const result = execFileSync('bd', argList, {
       encoding: 'utf8',
@@ -166,6 +192,10 @@ function bdArgs(argList, opts = {}) {
     });
     return result.trim();
   } catch (err) {
+    if (!_retry && isDoltConnectionError(err)) {
+      restartDolt();
+      return bdArgs(argList, { ...opts, _retry: true });
+    }
     if (opts.allowFail) return '';
     throw err;
   }
