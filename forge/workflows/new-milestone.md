@@ -66,6 +66,21 @@ Save for reference:
 bd remember --key "forge:milestone:<id>:goal" "<one-line goal>"
 ```
 
+## 4b. Create Worktree
+
+Create a git worktree for this milestone so phase work is isolated:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create <milestone-id>
+```
+
+If the worktree already exists (e.g. re-running new-milestone), this command will report the existing path — treat this as success, not an error.
+
+Get the worktree path and store it on the milestone bead:
+```bash
+WORKTREE_PATH=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-path <milestone-id>)
+bd remember --key "forge:milestone:<milestone-id>:worktree" "$WORKTREE_PATH"
+```
+
 ## 5. Define Requirements
 
 Based on the user's milestone goals, break them down into 5-12 concrete requirements.
@@ -167,5 +182,6 @@ bd remember --key "forge:session:last-milestone" "<milestone-id>"
 - [ ] Roadmapper spawned with phase numbering context
 - [ ] Phases created and wired to milestone and project
 - [ ] User approved requirements and roadmap
+- [ ] Worktree created and path stored via bd remember
 - [ ] Summary shown with next steps
 </success_criteria>

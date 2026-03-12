@@ -159,6 +159,15 @@ Completed: <date>"
 bd close <milestone-id> --reason="Milestone complete. <N> phases, <M/Y> requirements satisfied."
 ```
 
+## 7b. Remove Worktree
+
+Clean up the milestone worktree now that all phases are merged:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-remove <milestone-id>
+```
+
+If the worktree no longer exists (already removed or was never created), treat this as success — the cleanup goal is achieved either way.
+
 ## 8. Report and Next Steps
 
 ```
@@ -190,5 +199,6 @@ Next steps:
 - [ ] Requirement coverage checked via validates dependencies
 - [ ] Retrospective generated and stored in milestone bead notes
 - [ ] Milestone epic closed
+- [ ] Worktree removed via worktree-remove
 - [ ] Next steps presented to user
 </success_criteria>
