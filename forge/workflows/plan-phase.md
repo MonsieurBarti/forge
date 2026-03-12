@@ -240,14 +240,22 @@ Check:
 Run: node $HOME/.claude/forge/bin/forge-tools.cjs plan-check <phase-id>
 for automated coverage data.
 
-Produce a PASS or NEEDS REVISION verdict.
+Produce an APPROVED or NEEDS REVISION verdict as structured JSON:
+{
+  "verdict": "APPROVED" | "NEEDS REVISION",
+  "findings": [
+    { "number": 1, "severity": "blocker"|"suggestion", "description": "...", "fix": "exact command or action" }
+  ]
+}
+NEEDS REVISION MUST include at least one finding with severity=blocker.
+APPROVED may only contain findings with severity=suggestion.
 ")
 ```
 
-**If NEEDS REVISION:** Fix the flagged issues (update acceptance criteria, add missing
-validates links, resize tasks, fix deps), then re-run the plan-checker. Repeat until PASS.
+**If NEEDS REVISION:** Fix each blocker finding using its `fix` command, then re-run the
+plan-checker. Repeat until APPROVED.
 
-**If PASS:** Present the verified plan to the user:
+**If APPROVED:** Present the verified plan to the user:
 ```bash
 PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 ```

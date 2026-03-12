@@ -63,19 +63,69 @@ Flag missing or incorrect dependencies.
 </step>
 
 <step name="verdict">
-Produce a verdict:
+Produce a structured verdict in the following JSON format:
 
-**PASS**: All tasks have acceptance criteria, requirements are covered,
-sizing is reasonable, dependencies are correct.
-
-**NEEDS REVISION**: List specific issues that must be fixed before execution.
-
-Record the verdict:
-```bash
-bd comments add <phase-id> "Plan check: <PASS|NEEDS REVISION> - <summary>"
+```json
+{
+  "verdict": "APPROVED" | "NEEDS REVISION",
+  "findings": [
+    {
+      "number": 1,
+      "severity": "blocker" | "suggestion",
+      "description": "What is wrong or could be improved",
+      "fix": "Exact command or action to resolve this finding"
+    }
+  ]
+}
 ```
 
-If PASS, also note readiness:
+Rules:
+- **NEEDS REVISION** verdict MUST include at least one finding with `severity: "blocker"`.
+- **APPROVED** verdict may include findings with `severity: "suggestion"` only (no blockers).
+- Every finding MUST have a concrete `fix` — never leave it vague.
+
+Example NEEDS REVISION output:
+```json
+{
+  "verdict": "NEEDS REVISION",
+  "findings": [
+    {
+      "number": 1,
+      "severity": "blocker",
+      "description": "Task forgeflow-abc has no acceptance criteria",
+      "fix": "bd update forgeflow-abc --acceptance_criteria=\"<specific, testable criteria>\""
+    },
+    {
+      "number": 2,
+      "severity": "suggestion",
+      "description": "Requirement R3 has no validates link from any task",
+      "fix": "bd dep add forgeflow-xyz forgeflow-r3 --type=validates"
+    }
+  ]
+}
+```
+
+Example APPROVED output:
+```json
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "number": 1,
+      "severity": "suggestion",
+      "description": "Task forgeflow-def could be split into two smaller tasks",
+      "fix": "Consider splitting into separate UI and API tasks for clarity"
+    }
+  ]
+}
+```
+
+Record the verdict as a comment:
+```bash
+bd comments add <phase-id> "Plan check: <APPROVED|NEEDS REVISION> - <one-line summary>"
+```
+
+If APPROVED, also note readiness:
 ```bash
 bd comments add <phase-id> "Plan verified: ready for /forge:execute"
 ```
