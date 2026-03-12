@@ -50,9 +50,13 @@ bd dep add <task-id> <req-id> --type=validates
 </step>
 
 <step name="order">
-Add intra-phase dependencies where tasks must be done in order:
+Add intra-phase dependencies ONLY when strictly necessary — that is, when task B cannot
+start until it has the concrete output produced by task A (e.g. task B uses a file, API,
+or data structure that task A creates). Independent tasks that merely belong to the same
+phase should have NO inter-task dependency. When in doubt, leave tasks independent.
+
 ```bash
-bd dep add <task-b> <task-a>  # B depends on A
+bd dep add <task-b> <task-a>  # B depends on A — only add this when B truly needs A's output
 ```
 </step>
 
