@@ -708,6 +708,95 @@ const commands = {
   },
 
   /**
+   * Save execution checkpoint to phase bead notes and bd remember.
+   * Usage: forge-tools checkpoint-save <phase-id> <checkpoint-json>
+   * Checkpoint JSON should contain: phaseId, completedWaves, taskStatuses, timestamp, sessionId
+   */
+  'checkpoint-save'(args) {
+    const phaseId = args[0];
+    const checkpointArg = args.slice(1).join(' ');
+    if (!phaseId || !checkpointArg) {
+      console.error('Usage: forge-tools checkpoint-save <phase-id> <checkpoint-json>');
+      process.exit(1);
+    }
+
+    let checkpoint;
+    try {
+      checkpoint = JSON.parse(checkpointArg);
+    } catch (err) {
+      console.error(`Invalid checkpoint JSON: ${err.message}`);
+      process.exit(1);
+    }
+
+    // Ensure required fields and add timestamp if missing
+    if (!checkpoint.timestamp) {
+      checkpoint.timestamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    }
+    if (!checkpoint.phaseId) {
+      checkpoint.phaseId = phaseId;
+    }
+
+    const checkpointJson = JSON.stringify(checkpoint);
+    const notesValue = `forge:checkpoint ${checkpointJson}`;
+
+    // Write to phase bead notes (durable storage)
+    bd(`update ${phaseId} --notes ${JSON.stringify(notesValue)}`, { allowFail: false });
+
+    // Also store in bd remember for fast lookup
+    const memoryKey = `forge:checkpoint:${phaseId}`;
+    bd(`remember ${JSON.stringify(checkpointJson)} --key ${JSON.stringify(memoryKey)}`, { allowFail: true });
+
+    output({ saved: true, phaseId, checkpoint });
+  },
+
+  /**
+   * Load execution checkpoint from phase bead notes.
+   * Usage: forge-tools checkpoint-load <phase-id>
+   * Returns the stored checkpoint JSON or empty object if none found.
+   */
+  'checkpoint-load'(args) {
+    const phaseId = args[0];
+    if (!phaseId) {
+      console.error('Usage: forge-tools checkpoint-load <phase-id>');
+      process.exit(1);
+    }
+
+    let checkpoint = null;
+
+    // Try loading from phase bead notes (primary/durable source)
+    try {
+      const phase = bdJson(`show ${phaseId}`);
+      const notes = phase?.notes || '';
+      const match = notes.match(/forge:checkpoint\s+(\{[\s\S]*\})/);
+      if (match) {
+        checkpoint = JSON.parse(match[1]);
+      }
+    } catch { /* corrupt or missing — handled below */ }
+
+    // Fallback: try bd memories if notes didn't have it
+    if (!checkpoint) {
+      try {
+        const memKey = `forge:checkpoint:${phaseId}`;
+        const mem = bd(`memories ${memKey}`, { allowFail: true });
+        if (mem) {
+          // memories output is freeform; look for JSON object
+          const jsonMatch = mem.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            checkpoint = JSON.parse(jsonMatch[0]);
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (!checkpoint) {
+      output({});
+      return;
+    }
+
+    output(checkpoint);
+  },
+
+  /**
    * Get comprehensive progress with per-phase task breakdowns for the dashboard.
    */
   'full-progress'(args) {
