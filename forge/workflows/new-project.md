@@ -54,11 +54,11 @@ If no credentials, run `dolt login` and wait for the user to complete browser au
 3. **Guide repo creation:**
    DoltHub repos cannot be created via CLI — the user must create it on the web or via API token.
 
-   Ask: "Do you have a DoltHub API token, or would you prefer to create the repo on the web?"
-   - If **API token**: create the repo via API:
+   Ask: "Do you have a DoltHub API token (or `$DOLTHUB_TOKEN` env var set), or would you prefer to create the repo on the web?"
+   - If **API token**: create the repo via API (uses `$DOLTHUB_TOKEN` env var if set, otherwise prompt for token):
      ```bash
      curl -s -X POST "https://www.dolthub.com/api/v1alpha1/database" \
-       -H "authorization: token <TOKEN>" \
+       -H "authorization: token ${DOLTHUB_TOKEN}" \
        -H "content-type: application/json" \
        -d '{"ownerName":"<username>","repoName":"<repo-name>","visibility":"<public|private>"}'
      ```

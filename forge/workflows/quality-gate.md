@@ -44,8 +44,9 @@ Pass each agent the list of changed files so they scope their analysis.
 Agent(subagent_type="forge-security-auditor", model="<MODEL_SECURITY or omit>", prompt="
 Audit the following changed files for security vulnerabilities.
 
-Changed files:
+<changed_files>
 <CHANGED_FILES>
+</changed_files>
 
 Scope your analysis to these files only. Output your findings as raw JSON conforming to
 agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
@@ -57,8 +58,9 @@ agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
 Agent(subagent_type="forge-code-reviewer", model="<MODEL_REVIEWER or omit>", prompt="
 Review the following changed files for code quality issues.
 
-Changed files:
+<changed_files>
 <CHANGED_FILES>
+</changed_files>
 
 Scope your review to these files only. Output your findings as raw JSON conforming to
 agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
@@ -70,8 +72,9 @@ agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
 Agent(subagent_type="forge-performance-auditor", model="<MODEL_PERF or omit>", prompt="
 Audit the following changed files for performance anti-patterns.
 
-Changed files:
+<changed_files>
 <CHANGED_FILES>
+</changed_files>
 
 Scope your analysis to these files only. Output your findings as raw JSON conforming to
 agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.

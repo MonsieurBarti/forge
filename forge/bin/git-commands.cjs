@@ -8,10 +8,9 @@
  *           quick-branch-create, quick-pr-create
  */
 
-const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { bdJson, git, output } = require('./core.cjs');
+const { bdJson, git, gh, output } = require('./core.cjs');
 
 module.exports = {
   /**
@@ -206,24 +205,19 @@ module.exports = {
       : `forge/phase-${phaseId}`;
 
     // Idempotency: if a PR already exists for this branch, return it
-    try {
-      const existing = execFileSync('gh', [
-        'pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url',
-      ], { encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-      if (existing) {
-        return output({ created: false, url: existing, branch, base, title });
-      }
-    } catch (_) { /* no existing PR, proceed */ }
+    const existing = gh(['pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url'], { allowFail: true });
+    if (existing) {
+      return output({ created: false, url: existing, branch, base, title });
+    }
 
     try {
-      const prResult = execFileSync('gh', [
+      const prUrl = gh([
         'pr', 'create',
         '--title', title,
         '--body', body,
         '--base', base,
         '--head', branch,
-      ], { encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] });
-      const prUrl = prResult.trim();
+      ]);
       output({ created: true, url: prUrl, branch, base, title });
     } catch (err) {
       output({ created: false, error: err.message, branch, base });
@@ -286,24 +280,19 @@ module.exports = {
     const branch = `forge/quick-${quickId}`;
 
     // Idempotency: if a PR already exists for this branch, return it
-    try {
-      const existing = execFileSync('gh', [
-        'pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url',
-      ], { encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-      if (existing) {
-        return output({ created: false, url: existing, branch, base, title });
-      }
-    } catch (_) { /* no existing PR, proceed */ }
+    const existing = gh(['pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url'], { allowFail: true });
+    if (existing) {
+      return output({ created: false, url: existing, branch, base, title });
+    }
 
     try {
-      const prResult = execFileSync('gh', [
+      const prUrl = gh([
         'pr', 'create',
         '--title', title,
         '--body', body,
         '--base', base,
         '--head', branch,
-      ], { encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] });
-      const prUrl = prResult.trim();
+      ]);
       output({ created: true, url: prUrl, branch, base, title });
     } catch (err) {
       output({ created: false, error: err.message, branch, base });

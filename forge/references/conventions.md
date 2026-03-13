@@ -131,6 +131,7 @@ Session memories persist the most recent active context so sessions can be resum
 |-----|-----------|---------|
 | `forge:session:project-id` | `/forge:new`, `/forge:resume` | ID of the active project |
 | `forge:session:current-phase` | `/forge:execute`, `/forge:plan` | ID of the currently active phase |
+| `forge:session:last-milestone` | `/forge:new-milestone`, `/forge:new` | ID of the most recently created/active milestone |
 | `forge:session:notes` | `/forge:pause` | Free-form notes saved at pause time |
 
 ### Memory Lifecycle
