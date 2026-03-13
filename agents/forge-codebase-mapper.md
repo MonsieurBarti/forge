@@ -772,4 +772,3 @@ Ready for orchestrator summary.
 **DO NOT COMMIT.** The orchestrator handles git operations.
 
 </critical_rules>
-</output>

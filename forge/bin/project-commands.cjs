@@ -24,6 +24,128 @@ const {
   findGitRoot,
 } = require('./core.cjs');
 
+// ---------------------------------------------------------------------------
+// Shared helpers (extracted to reduce duplication)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize the result of bdJson('children ...') into a flat array.
+ * bd may return an array directly, or an object with .issues / .children.
+ */
+function normalizeChildren(raw) {
+  return Array.isArray(raw) ? raw : (raw?.issues || raw?.children || []);
+}
+
+/**
+ * Parse a bd create result to extract the bead ID.
+ * Tries JSON first, falls back to regex match.
+ */
+function parseBdCreateId(result) {
+  if (!result) return null;
+  try {
+    const data = JSON.parse(result);
+    return data.id || data.issue_id || null;
+  } catch {
+    const match = result.match(/([a-z]+-[a-z0-9]+)/);
+    return match ? match[1] : null;
+  }
+}
+
+/**
+ * Coerce string 'true'/'false' to boolean, pass through everything else.
+ */
+function coerceBool(v) {
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return v;
+}
+
+/**
+ * Parse a dot-separated settings key into { topKey, subKey, isNested }.
+ */
+function parseDotKey(key) {
+  const dotIdx = key.indexOf('.');
+  const isNested = dotIdx !== -1;
+  return {
+    topKey: isNested ? key.slice(0, dotIdx) : key,
+    subKey: isNested ? key.slice(dotIdx + 1) : null,
+    isNested,
+  };
+}
+
+/**
+ * Load settings merged from defaults < global < project.
+ * Returns { merged, sources }.
+ */
+function loadMergedSettings() {
+  const merged = { ...SETTINGS_DEFAULTS };
+  const sources = {};
+  for (const key of Object.keys(SETTINGS_DEFAULTS)) {
+    sources[key] = 'default';
+  }
+
+  try {
+    const globalText = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+    const globalSettings = parseFrontmatter(globalText);
+    for (const [key, val] of Object.entries(globalSettings)) {
+      if (key in SETTINGS_DEFAULTS) {
+        merged[key] = val;
+        sources[key] = 'global';
+      }
+    }
+  } catch {
+    // No global settings file
+  }
+
+  try {
+    const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+    const projectText = fs.readFileSync(projectPath, 'utf8');
+    const projectSettings = parseSimpleYaml(projectText);
+    for (const [key, val] of Object.entries(projectSettings)) {
+      if (key in SETTINGS_DEFAULTS) {
+        merged[key] = val;
+        sources[key] = 'project';
+      }
+    }
+  } catch {
+    // No project settings file
+  }
+
+  return { merged, sources };
+}
+
+/**
+ * Stamp _sortKey on phase detail objects, sort, then clean up the transient key.
+ */
+function sortPhaseDetails(details) {
+  for (const pd of details) {
+    pd._sortKey = parseFloat((pd.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
+  }
+  details.sort((a, b) => a._sortKey - b._sortKey);
+  for (const pd of details) {
+    delete pd._sortKey;
+  }
+  return details;
+}
+
+/**
+ * Named color map (module-level constant for reuse).
+ */
+const COLOR_MAP = {
+  red: '#e74c3c', orange: '#f39c12', yellow: '#f1c40f', green: '#2ecc71',
+  blue: '#3498db', purple: '#9b59b6', cyan: '#00bcd4', pink: '#e91e63',
+  indigo: '#6366f1', teal: '#14b8a6', amber: '#f59e0b', crimson: '#dc2626',
+  magenta: '#d946ef', lime: '#84cc16', violet: '#8b5cf6', emerald: '#10b981',
+  rose: '#f43f5e', sky: '#0ea5e9', slate: '#64748b', gray: '#6b7280',
+  white: '#fafafa', gold: '#eab308',
+};
+
+/** Hex color pattern for validation */
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{3,6}$/;
+
+/** Safe fallback color when an untrusted value fails validation */
+const SAFE_FALLBACK_COLOR = '#8b949e';
+
 /**
  * Expand simple glob patterns (e.g., "apps/*", "packages/*") to package directories.
  * Complex globs containing intermediate wildcards are skipped.
@@ -177,8 +299,7 @@ function extractWorkspacePath(bead) {
  *     phase_count, completed_count }
  */
 function collectProjectIssues(projectId) {
-  const children = bdJson(`children ${projectId}`);
-  const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+  const issues = normalizeChildren(bdJson(`children ${projectId}`));
 
   const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
   const phases = [];
@@ -196,8 +317,7 @@ function collectProjectIssues(projectId) {
 
   // Collect from milestones (correct hierarchy) with per-milestone grouping
   for (const ms of milestones) {
-    const msChildren = bdJson(`children ${ms.id}`);
-    const msIssues = Array.isArray(msChildren) ? msChildren : (msChildren?.issues || msChildren?.children || []);
+    const msIssues = normalizeChildren(bdJson(`children ${ms.id}`));
 
     const msPhases = [];
     const msReqs = [];
@@ -274,8 +394,7 @@ function buildPhaseDetails(phases, { includeMeta = false } = {}) {
 
   const details = [];
   for (const phase of phases) {
-    const phaseChildren = bdJson(`children ${phase.id}`);
-    const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+    const tasks = normalizeChildren(bdJson(`children ${phase.id}`));
     const entry = {
       id: phase.id,
       title: phase.title,
@@ -497,10 +616,10 @@ function generateDashboardHTML(data) {
 
   // Agent roster
   const agentCardsHTML = agents.map(a => {
-    const colorVal = a.color || '#8b949e';
-    // Map named colors to hex
-    const colorMap = { red: '#e74c3c', orange: '#f39c12', yellow: '#f1c40f', green: '#2ecc71', blue: '#3498db', purple: '#9b59b6', cyan: '#00bcd4', pink: '#e91e63', indigo: '#6366f1', teal: '#14b8a6', amber: '#f59e0b', crimson: '#dc2626', magenta: '#d946ef', lime: '#84cc16', violet: '#8b5cf6', emerald: '#10b981', rose: '#f43f5e', sky: '#0ea5e9', slate: '#64748b', gray: '#6b7280', white: '#fafafa', gold: '#eab308' };
-    const resolvedColor = colorMap[colorVal.toLowerCase()] || colorVal;
+    const colorVal = a.color || SAFE_FALLBACK_COLOR;
+    const mapped = COLOR_MAP[colorVal.toLowerCase()];
+    // Validate: must be a known named color or a valid hex color
+    const resolvedColor = mapped || (HEX_COLOR_RE.test(colorVal) ? colorVal : SAFE_FALLBACK_COLOR);
     return `
         <div class="agent-card" style="--agent-color:${resolvedColor}">
           <div class="agent-vibe">${esc(a.vibe)}</div>
@@ -1401,29 +1520,25 @@ module.exports = {
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements, milestoneDetails } = collectProjectIssues(projectId);
 
-    // Build flat phaseDetails and reqCoverage (used by generateDashboardHTML for overall view)
-    const phaseDetails = buildPhaseDetails(phases, { includeMeta: true });
-
-    for (const pd of phaseDetails) {
-      pd._sortKey = parseFloat((pd.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
-    }
-    phaseDetails.sort((a, b) => a._sortKey - b._sortKey);
-
+    // Build phaseDetails once (keyed by ID) and reqCoverage once globally
+    const phaseDetails = sortPhaseDetails(buildPhaseDetails(phases, { includeMeta: true }));
     const reqCoverage = getRequirementCoverage(requirements);
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
     const progressPercent = totalPhases > 0 ? Math.round((completedPhases / totalPhases) * 100) : 0;
 
-    // Build milestone-grouped structure with nested phase details and req coverage
-    const milestonesGrouped = milestoneDetails.map(ms => {
-      const msPhaseDetails = buildPhaseDetails(ms.phases, { includeMeta: true });
-      for (const pd of msPhaseDetails) {
-        pd._sortKey = parseFloat((pd.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
-      }
-      msPhaseDetails.sort((a, b) => a._sortKey - b._sortKey);
+    // Index for O(1) lookups
+    const phaseDetailMap = new Map(phaseDetails.map(pd => [pd.id, pd]));
+    const reqCoverageMap = new Map(reqCoverage.map(rc => [rc.id, rc]));
 
-      const msReqCoverage = getRequirementCoverage(ms.requirements);
+    // Build milestone-grouped structure by slicing the pre-built maps
+    const milestonesGrouped = milestoneDetails.map(ms => {
+      const msPhaseDetails = sortPhaseDetails(
+        ms.phases.map(p => phaseDetailMap.get(p.id)).filter(Boolean)
+      );
+      const msReqCoverage = ms.requirements
+        .map(r => reqCoverageMap.get(r.id)).filter(Boolean);
 
       return {
         id: ms.id,
@@ -1448,7 +1563,6 @@ module.exports = {
       projectTitle, projectId, timestamp, progressPercent,
       totalPhases, completedPhases,
       phaseDetails, reqCoverage,
-      // New milestone-grouped structure
       milestones: milestonesGrouped,
       agents,
     };
@@ -1458,9 +1572,16 @@ module.exports = {
     const diagDir = path.join(process.cwd(), '.forge');
     fs.mkdirSync(diagDir, { recursive: true });
     const filePath = path.join(diagDir, `forge-dashboard-${projectId}.html`);
-    fs.writeFileSync(filePath, html, 'utf8');
+    // Path traversal guard: ensure filePath stays within diagDir
+    const resolvedDiagDir = path.resolve(diagDir);
+    const resolvedFilePath = path.resolve(filePath);
+    if (!resolvedFilePath.startsWith(resolvedDiagDir + path.sep) && resolvedFilePath !== resolvedDiagDir) {
+      console.error('Invalid dashboard file path');
+      process.exit(1);
+    }
+    fs.writeFileSync(resolvedFilePath, html, 'utf8');
 
-    output({ path: filePath, projectId, timestamp });
+    output({ path: resolvedFilePath, projectId, timestamp });
   },
 
   /**
@@ -1473,9 +1594,7 @@ module.exports = {
       process.exit(1);
     }
 
-    const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
-    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+    const { phases } = collectProjectIssues(projectId);
 
     const currentPhase = phases.find(p => p.status === 'in_progress') || phases.find(p => p.status === 'open');
     const completedPhases = phases.filter(p => p.status === 'closed').length;
@@ -1483,8 +1602,7 @@ module.exports = {
     const inProgressTasks = [];
     for (const phase of phases) {
       if (phase.status === 'closed') continue;
-      const phaseChildren = bdJson(`children ${phase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      const tasks = normalizeChildren(bdJson(`children ${phase.id}`));
       for (const task of tasks) {
         if (task.status === 'in_progress') {
           inProgressTasks.push({ id: task.id, title: task.title, phase: phase.id });
@@ -1531,15 +1649,12 @@ module.exports = {
       return;
     }
 
-    const children = bdJson(`children ${project.id}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
-    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+    const { phases } = collectProjectIssues(project.id);
     const currentPhase = phases.find(p => p.status === 'in_progress') || phases.find(p => p.status === 'open');
 
     const inProgressTasks = [];
     if (currentPhase) {
-      const phaseChildren = bdJson(`children ${currentPhase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      const tasks = normalizeChildren(bdJson(`children ${currentPhase.id}`));
       for (const task of tasks) {
         if (task.status === 'in_progress') {
           inProgressTasks.push({ id: task.id, title: task.title });
@@ -1574,8 +1689,7 @@ module.exports = {
       return;
     }
 
-    const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(bdJson(`children ${projectId}`));
 
     const phases = issues.filter(i =>
       (i.labels || []).includes('forge:phase') || i.issue_type === 'epic'
@@ -1609,8 +1723,7 @@ module.exports = {
     // Cache phase children once for reuse in task-labels and closeable-phase loops
     const phaseChildrenMap = new Map();
     for (const phase of phases) {
-      const phaseChildren = bdJson(`children ${phase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      const tasks = normalizeChildren(bdJson(`children ${phase.id}`));
       phaseChildrenMap.set(phase.id, tasks);
     }
 
@@ -1863,38 +1976,7 @@ module.exports = {
    * Load merged settings (defaults < global < project).
    */
   'settings-load'() {
-    const merged = { ...SETTINGS_DEFAULTS };
-    const sources = {};
-    for (const key of Object.keys(SETTINGS_DEFAULTS)) {
-      sources[key] = 'default';
-    }
-
-    try {
-      const globalText = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-      const globalSettings = parseFrontmatter(globalText);
-      for (const [key, val] of Object.entries(globalSettings)) {
-        if (key in SETTINGS_DEFAULTS) {
-          merged[key] = val;
-          sources[key] = 'global';
-        }
-      }
-    } catch {
-      // No global settings file
-    }
-
-    try {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      const projectText = fs.readFileSync(projectPath, 'utf8');
-      const projectSettings = parseSimpleYaml(projectText);
-      for (const [key, val] of Object.entries(projectSettings)) {
-        if (key in SETTINGS_DEFAULTS) {
-          merged[key] = val;
-          sources[key] = 'project';
-        }
-      }
-    } catch {
-      // No project settings file
-    }
+    const { merged, sources } = loadMergedSettings();
 
     const settings = Object.keys(SETTINGS_DEFAULTS).map(key => ({
       key,
@@ -1924,10 +2006,7 @@ module.exports = {
       process.exit(1);
     }
 
-    const dotIdx = key.indexOf('.');
-    const isNested = dotIdx !== -1;
-    const topKey = isNested ? key.slice(0, dotIdx) : key;
-    const subKey = isNested ? key.slice(dotIdx + 1) : null;
+    const { topKey, subKey, isNested } = parseDotKey(key);
 
     const EXTRA_TOP_KEYS = ['model_profile', 'model_overrides'];
     if (!isNested && !(topKey in SETTINGS_DEFAULTS) && !EXTRA_TOP_KEYS.includes(topKey)) {
@@ -1936,9 +2015,7 @@ module.exports = {
       process.exit(1);
     }
 
-    let parsedValue = value;
-    if (value === 'true') parsedValue = true;
-    else if (value === 'false') parsedValue = false;
+    const parsedValue = coerceBool(value);
 
     function setNestedKey(obj, tKey, sKey, val) {
       if (sKey) {
@@ -1990,10 +2067,7 @@ module.exports = {
       process.exit(1);
     }
 
-    const dotIdx = key.indexOf('.');
-    const isNested = dotIdx !== -1;
-    const topKey = isNested ? key.slice(0, dotIdx) : key;
-    const subKey = isNested ? key.slice(dotIdx + 1) : null;
+    const { topKey, subKey } = parseDotKey(key);
 
     function clearNestedKey(obj, tKey, sKey) {
       if (sKey && obj[tKey] && typeof obj[tKey] === 'object') {
@@ -2058,9 +2132,7 @@ module.exports = {
       } catch { /* new file */ }
       for (const [key, value] of Object.entries(updates)) {
         if (!(key in SETTINGS_DEFAULTS)) continue;
-        let parsedValue = value;
-        if (value === 'true') parsedValue = true;
-        else if (value === 'false') parsedValue = false;
+        const parsedValue = coerceBool(value);
         existing[key] = parsedValue;
         results.push({ key, value: parsedValue });
       }
@@ -2073,9 +2145,7 @@ module.exports = {
       } catch { /* new file */ }
       for (const [key, value] of Object.entries(updates)) {
         if (!(key in SETTINGS_DEFAULTS)) continue;
-        let parsedValue = value;
-        if (value === 'true') parsedValue = true;
-        else if (value === 'false') parsedValue = false;
+        const parsedValue = coerceBool(value);
         existing[key] = parsedValue;
         results.push({ key, value: parsedValue });
       }
@@ -2154,7 +2224,7 @@ module.exports = {
       process.exit(1);
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
-    const value = bd(`kv get ${fullKey}`, { allowFail: true });
+    const value = bdArgs(['kv', 'get', fullKey], { allowFail: true });
     output({ key: fullKey, value: value || null });
   },
 
@@ -2211,7 +2281,7 @@ module.exports = {
       process.exit(1);
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
-    bd(`kv clear ${fullKey}`, { allowFail: true });
+    bdArgs(['kv', 'clear', fullKey], { allowFail: true });
     output({ ok: true, key: fullKey, cleared: true });
   },
 
@@ -2254,14 +2324,7 @@ module.exports = {
       process.exit(1);
     }
 
-    let debugId;
-    try {
-      const data = JSON.parse(result);
-      debugId = data.id || data.issue_id;
-    } catch {
-      const match = result.match(/([a-z]+-[a-z0-9]+)/);
-      debugId = match ? match[1] : null;
-    }
+    const debugId = parseBdCreateId(result);
 
     if (!debugId) {
       console.error('Failed to parse debug bead ID from:', result);
@@ -2352,20 +2415,13 @@ module.exports = {
     if (files) descParts.push(`Files: ${files}`);
     const fullDesc = descParts.filter(Boolean).join('\n');
 
-    const result = bd(`create --title="${title.replace(/"/g, '\\"')}" --description="${fullDesc.replace(/"/g, '\\"')}" --type=task --priority=3 --json`);
+    const result = bdArgs(['create', `--title=${title}`, `--description=${fullDesc}`, '--type=task', '--priority=3', '--json']);
     if (!result) {
       console.error('Failed to create todo bead');
       process.exit(1);
     }
 
-    let todoId;
-    try {
-      const data = JSON.parse(result);
-      todoId = data.id || data.issue_id;
-    } catch {
-      const match = result.match(/([a-z]+-[a-z0-9]+)/);
-      todoId = match ? match[1] : null;
-    }
+    const todoId = parseBdCreateId(result);
 
     if (!todoId) {
       console.error('Failed to parse todo bead ID from:', result);
@@ -2388,13 +2444,11 @@ module.exports = {
       process.exit(1);
     }
 
-    const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(bdJson(`children ${projectId}`));
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
 
     const result = milestones.map(m => {
-      const mChildren = bdJson(`children ${m.id}`);
-      const mIssues = Array.isArray(mChildren) ? mChildren : (mChildren?.issues || mChildren?.children || []);
+      const mIssues = normalizeChildren(bdJson(`children ${m.id}`));
       const phases = mIssues.filter(i => (i.labels || []).includes('forge:phase'));
       const reqs = mIssues.filter(i => (i.labels || []).includes('forge:req'));
 
@@ -2440,14 +2494,12 @@ module.exports = {
       process.exit(1);
     }
 
-    const children = bdJson(`children ${milestoneId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(bdJson(`children ${milestoneId}`));
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
     const requirements = issues.filter(i => (i.labels || []).includes('forge:req'));
 
     const phaseHealth = phases.map(phase => {
-      const pChildren = bdJson(`children ${phase.id}`);
-      const pIssues = Array.isArray(pChildren) ? pChildren : (pChildren?.issues || pChildren?.children || []);
+      const pIssues = normalizeChildren(bdJson(`children ${phase.id}`));
       const tasks = pIssues.filter(i => (i.labels || []).includes('forge:task'));
       const closedTasks = tasks.filter(t => t.status === 'closed');
       return {
@@ -2619,21 +2671,7 @@ module.exports = {
       verifier: resolveAgentModel('forge-verifier'),
     };
 
-    const merged = { ...SETTINGS_DEFAULTS };
-    try {
-      const globalText = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-      const globalSettings = parseFrontmatter(globalText);
-      for (const [key, val] of Object.entries(globalSettings)) {
-        if (key in SETTINGS_DEFAULTS) merged[key] = val;
-      }
-    } catch { /* no global settings */ }
-    try {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      const projectSettings = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      for (const [key, val] of Object.entries(projectSettings)) {
-        if (key in SETTINGS_DEFAULTS) merged[key] = val;
-      }
-    } catch { /* no project settings */ }
+    const { merged } = loadMergedSettings();
 
     output({
       found: !!project,
