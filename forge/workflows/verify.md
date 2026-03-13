@@ -1,6 +1,7 @@
 <purpose>
 Verify that a phase's tasks meet their acceptance criteria. Automated checks where possible,
-then human UAT confirmation. Close verified work and update phase status.
+then human UAT confirmation. Includes quality gate audit, re-verification after fixes, and
+retrospective capture. Close verified work and update phase status.
 </purpose>
 
 <process>
@@ -112,10 +113,16 @@ If some tasks need rework (no --force):
 - Report which tasks need attention
 - Suggest `/forge:execute <phase>` to redo failed tasks
 
-## 6. Quality Gate (Optional Pre-PR Audit)
+## 6. Quality Gate (Conditional Pre-PR Audit)
 
 This step runs only when the phase is being closed (all tasks verified or --force override).
 Skip this step if closure was blocked.
+
+**Capture the pre-quality-gate commit SHA** (used by Step 7 to detect new commits):
+
+```bash
+PRE_QG_SHA=$(git rev-parse HEAD)
+```
 
 **Check the quality_gate setting:**
 
@@ -123,16 +130,21 @@ Skip this step if closure was blocked.
 node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load
 ```
 
+> **Note:** Settings should be loaded once and cached for the entire workflow run.
+> Sub-workflows (e.g., quality-gate.md) should reuse these cached settings rather than
+> re-invoking `settings-load`.
+
 Parse the result and read the `quality_gate` value.
 
-- If `quality_gate` is `false`, skip this step silently — proceed directly to step 9.
+- If `quality_gate` is `false`, skip this step silently — proceed directly to step 8.
 - If `quality_gate` is `true` (or not explicitly set to false), run the quality gate pipeline below.
 
 **Scope changed files:**
 
 Determine which files were changed in this phase branch relative to the base branch:
 ```bash
-CHANGED_FILES=$(git diff main...HEAD --name-only)
+BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null)
+CHANGED_FILES=$(git diff --name-only "$BASE"..HEAD)
 ```
 
 If no files were changed, skip the quality gate silently.
@@ -148,19 +160,14 @@ audit-findings schema, and presents them to the user.
 
 After the quality gate workflow completes:
 
-- If there are no findings (all agents report zero issues), inform the user and proceed to step 9.
+- If there are no findings (all agents report zero issues), inform the user and proceed to step 8.
 - If there are findings, they are presented to the user as part of the quality-gate workflow.
   The user can approve fixes, skip individual findings, or skip all.
-- If the user approves fixes and changes are applied, commit them before proceeding:
-
-```bash
-git add <fixed-files>
-git commit -m "fix: apply quality gate remediations
-
-Automated fixes from pre-PR quality audit (security, code review, performance)."
-```
-
-- If the user skips all findings (approves none), proceed to step 9 normally with no
+- If the user approves fixes and changes are applied, the quality-gate sub-workflow's fixer
+  agent handles committing them. No additional `git add` / `git commit` is needed here.
+- If the quality gate sub-workflow aborted due to agent failures, treat this step as skipped
+  (no re-verification needed in Step 7).
+- If the user skips all findings (approves none), proceed to step 8 normally with no
   additional commits.
 
 ## 7. Re-verify After Quality Gate
@@ -170,15 +177,18 @@ Skip this step if closure was blocked.
 
 **Check whether quality gate produced new commits:**
 
-Compare `HEAD` after Step 6 completes with the commit SHA recorded before Step 6 began.
-If the quality gate was skipped (setting disabled or no changed files), skip this step as well.
+Compare `HEAD` after Step 6 completes with `PRE_QG_SHA` captured at the start of Step 6.
+If the quality gate was skipped (setting disabled, no changed files, or sub-workflow aborted),
+skip this step as well.
 
 ```bash
 POST_QG_SHA=$(git rev-parse HEAD)
 ```
 
-- If `POST_QG_SHA` equals the SHA before Step 6 (no new commits from quality gate):
+- If `POST_QG_SHA` equals `PRE_QG_SHA` (no new commits from quality gate):
   Log `"No quality gate changes — skipping re-verification."` and proceed to Step 8.
+  Note: if the quality gate ran but the user approved zero fixes, `POST_QG_SHA` will equal
+  `PRE_QG_SHA` and this step is a no-op — this is expected behavior.
 
 - If `POST_QG_SHA` differs (quality gate produced fix commits): run re-verification below.
 
@@ -188,10 +198,7 @@ Re-run the same automated verification from Step 3 on ALL tasks (not just tasks 
 the quality gate changes). This ensures the quality gate fixes did not break any acceptance
 criteria.
 
-Resolve the model for the verifier agent:
-```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-verifier --raw)
-```
+Reuse the `MODEL` value resolved in Step 3. No need to call `resolve-model` again.
 
 For phases with multiple tasks, spawn a **forge-verifier** agent (with `model` if non-empty)
 to handle parallel re-verification. For single-task phases, verify inline.
@@ -234,7 +241,7 @@ Use AskUserQuestion:
 - Question: "How effective was the overall approach for this phase? Rate 1-5."
 - Options: "1 - Poor" / "2 - Below average" / "3 - Average" / "4 - Good" / "5 - Excellent"
 
-Store the numeric rating (1–5) as `approach_effectiveness`.
+Store the numeric rating (1-5) as `approach_effectiveness`.
 
 **Ask for key lessons:**
 
@@ -276,10 +283,10 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write phase-abc123 \
 
 ## 9. Requirement Coverage Check
 
-Identify the parent milestone for this phase:
-```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>
-```
+> **Note:** Reuse the project context fetched in Step 1 rather than re-invoking
+> `project-context`. The phase and project data are unchanged within this workflow run.
+
+Identify the parent milestone for this phase using the project context from Step 1.
 
 Look up the phase's parent bead in the context. If no parent milestone exists, skip this step silently.
 
@@ -294,6 +301,10 @@ For each forge:req bead found, check whether any task in the current phase has a
 bd dep list <req-id> --type validates --json
 # Check if any of the validating task IDs belong to this phase's task list
 ```
+
+> **Performance note:** The per-requirement `bd dep list` calls above produce O(M) subprocess
+> invocations where M is the number of requirements. If the bd CLI gains a batch query mode
+> in the future, prefer that to reduce overhead.
 
 Build the coverage map:
 - **Covered**: at least one task in this phase has a `validates` link to the req
@@ -358,3 +369,4 @@ Display the PR URL to the user and remind them:
 Suggest next step: `/forge:plan <next-phase>` or `/forge:progress`.
 
 </process>
+</output>
