@@ -74,6 +74,15 @@ AskUserQuestion([
       { label: "Yes (Recommended)", description: "Run wave tasks concurrently via subagents" },
       { label: "No", description: "Execute tasks sequentially" }
     ]
+  },
+  {
+    question: "Run quality gate before creating PRs?",
+    header: "Quality Gate",
+    multiSelect: false,
+    options: [
+      { label: "Yes", description: "Run security, code review, and performance audits before PR" },
+      { label: "No", description: "Skip quality gate" }
+    ]
   }
 ])
 ```
@@ -85,6 +94,7 @@ Map answers to settings values:
 - Verification: No=false, Yes=true -> `skip_verification` (note: inverted question)
 - Auto-Commit: Yes=true, No=false -> `auto_commit`
 - Parallel: Yes=true, No=false -> `parallel_execution`
+- Quality Gate: Yes=true, No=false -> `quality_gate`
 </step>
 
 <step name="choose_scope">
@@ -138,6 +148,7 @@ Forge Settings Updated
 | Skip Verification    | Off   | project |
 | Auto Commit          | On    | default |
 | Parallel Execution   | On    | default |
+| Quality Gate         | On    | default |
 
 Source priority: project > global > default
 
@@ -151,7 +162,7 @@ Quick overrides:
 
 <success_criteria>
 - [ ] Current settings loaded from all layers
-- [ ] User presented with 6 workflow toggles
+- [ ] User presented with 7 workflow toggles
 - [ ] User chose save scope (project/global/both)
 - [ ] Settings saved to chosen scope(s)
 - [ ] Final effective settings displayed with sources

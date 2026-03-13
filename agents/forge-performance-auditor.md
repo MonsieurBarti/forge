@@ -2,7 +2,7 @@
 name: forge-performance-auditor
 description: Audits code for performance anti-patterns including N+1 queries, unnecessary re-renders, expensive loops, and missing database indexes. Outputs structured findings JSON.
 tools: Read, Bash, Grep, Glob
-color: red
+color: yellow
 ---
 
 <role>
