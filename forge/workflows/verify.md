@@ -112,7 +112,58 @@ If some tasks need rework (no --force):
 - Report which tasks need attention
 - Suggest `/forge:execute <phase>` to redo failed tasks
 
-## 5.1. Capture Phase Retrospective
+## 6. Quality Gate (Optional Pre-PR Audit)
+
+This step runs only when the phase is being closed (all tasks verified or --force override).
+Skip this step if closure was blocked.
+
+**Check the quality_gate setting:**
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load
+```
+
+Parse the result and read the `quality_gate` value.
+
+- If `quality_gate` is `false`, skip this step silently — proceed directly to step 9.
+- If `quality_gate` is `true` (or not explicitly set to false), run the quality gate pipeline below.
+
+**Scope changed files:**
+
+Determine which files were changed in this phase branch relative to the base branch:
+```bash
+CHANGED_FILES=$(git diff main...HEAD --name-only)
+```
+
+If no files were changed, skip the quality gate silently.
+
+**Run the quality gate pipeline:**
+
+Follow the quality-gate workflow defined in `@~/.claude/forge/workflows/quality-gate.md`,
+passing the list of changed files as scope. This workflow spawns the three audit agents
+(security-auditor, code-reviewer, performance-auditor), collects findings in the shared
+audit-findings schema, and presents them to the user.
+
+**Present findings and apply fixes:**
+
+After the quality gate workflow completes:
+
+- If there are no findings (all agents report zero issues), inform the user and proceed to step 9.
+- If there are findings, they are presented to the user as part of the quality-gate workflow.
+  The user can approve fixes, skip individual findings, or skip all.
+- If the user approves fixes and changes are applied, commit them before proceeding:
+
+```bash
+git add <fixed-files>
+git commit -m "fix: apply quality gate remediations
+
+Automated fixes from pre-PR quality audit (security, code review, performance)."
+```
+
+- If the user skips all findings (approves none), proceed to step 9 normally with no
+  additional commits.
+
+## 8. Capture Phase Retrospective
 
 This step runs only when the phase is being closed (all tasks verified or --force override).
 Skip this step if closure was blocked (no --force and tasks failed).
@@ -168,58 +219,7 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write phase-abc123 \
   '{"agent":"forge-verifier","status":"completed","findings":["Approach effectiveness: 4/5","Task count: 5","Parallel agents reduced wall time significantly"],"decisions":[],"blockers":["BLOCKED: Fix auth flow (task-xyz)"]}'
 ```
 
-## 5.2. Quality Gate (Optional Pre-PR Audit)
-
-This step runs only when the phase is being closed (all tasks verified or --force override).
-Skip this step if closure was blocked.
-
-**Check the quality_gate setting:**
-
-```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load
-```
-
-Parse the result and read the `quality_gate` value.
-
-- If `quality_gate` is `false`, skip this step silently — proceed directly to step 5.5.
-- If `quality_gate` is `true` (or not explicitly set to false), run the quality gate pipeline below.
-
-**Scope changed files:**
-
-Determine which files were changed in this phase branch relative to the base branch:
-```bash
-CHANGED_FILES=$(git diff main...HEAD --name-only)
-```
-
-If no files were changed, skip the quality gate silently.
-
-**Run the quality gate pipeline:**
-
-Follow the quality-gate workflow defined in `@~/.claude/forge/workflows/quality-gate.md`,
-passing the list of changed files as scope. This workflow spawns the three audit agents
-(security-auditor, code-reviewer, performance-auditor), collects findings in the shared
-audit-findings schema, and presents them to the user.
-
-**Present findings and apply fixes:**
-
-After the quality gate workflow completes:
-
-- If there are no findings (all agents report zero issues), inform the user and proceed to step 5.5.
-- If there are findings, they are presented to the user as part of the quality-gate workflow.
-  The user can approve fixes, skip individual findings, or skip all.
-- If the user approves fixes and changes are applied, commit them before proceeding:
-
-```bash
-git add <fixed-files>
-git commit -m "fix: apply quality gate remediations
-
-Automated fixes from pre-PR quality audit (security, code review, performance)."
-```
-
-- If the user skips all findings (approves none), proceed to step 5.5 normally with no
-  additional commits.
-
-## 5.5. Requirement Coverage Check
+## 9. Requirement Coverage Check
 
 Identify the parent milestone for this phase:
 ```bash
@@ -264,7 +264,7 @@ Or run /forge:audit-milestone to check full milestone coverage.
 
 If all reqs are covered by this phase's tasks, or if no milestone/reqs exist, show nothing.
 
-## 6. Push Branch and Create Pull Request
+## 10. Push Branch and Create Pull Request
 
 After the phase is closed (all tasks verified) and requirement coverage is checked, push
 the phase branch and open a PR for user review. Forge NEVER merges — the user reviews,
