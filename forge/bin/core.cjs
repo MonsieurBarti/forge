@@ -29,6 +29,7 @@ const SETTINGS_DEFAULTS = {
   auto_research: true,
   plan_check: true,
   parallel_execution: true,
+  quality_gate: true,
 };
 
 const SETTINGS_DESCRIPTIONS = {
@@ -38,6 +39,7 @@ const SETTINGS_DESCRIPTIONS = {
   auto_research: 'Auto-run research before planning',
   plan_check: 'Run plan checker to validate plans',
   parallel_execution: 'Execute independent tasks in parallel',
+  quality_gate: 'Run pre-PR quality pipeline (security, code review, performance audits)',
 };
 
 // --- Model Profile Table ---
@@ -54,6 +56,9 @@ const MODEL_PROFILES = {
   'forge-plan-checker':   { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
   'forge-debugger':       { quality: 'opus',   balanced: 'sonnet', budget: 'sonnet' },
   'forge-codebase-mapper':{ quality: 'sonnet', balanced: 'haiku',  budget: 'haiku' },
+  'forge-security-auditor':  { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
+  'forge-code-reviewer':     { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
+  'forge-performance-auditor':{ quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
 };
 
 // Map old role names to new agent names for backwards compatibility
@@ -66,6 +71,9 @@ const ROLE_TO_AGENT = {
   plan_checker: 'forge-plan-checker',
   debugger: 'forge-debugger',
   codebase_mapper: 'forge-codebase-mapper',
+  security_auditor: 'forge-security-auditor',
+  code_reviewer: 'forge-code-reviewer',
+  performance_auditor: 'forge-performance-auditor',
 };
 
 const DEFAULT_MODEL_PROFILE = 'balanced';
