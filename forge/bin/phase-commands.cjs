@@ -6,7 +6,7 @@
  * Commands: phase-context, phase-ready, plan-check, preflight-check,
  *           detect-waves, checkpoint-save, checkpoint-load, verify-phase,
  *           add-phase, insert-phase, remove-phase, list-phases,
- *           resolve-phase, context-write, context-read
+ *           resolve-phase, context-write, context-read, retro-query
  */
 
 const fs = require('fs');
@@ -937,5 +937,82 @@ module.exports = {
     }
 
     output({ phaseId, contexts });
+  },
+
+  /**
+   * Query retrospective data from all closed phases under a project.
+   * Aggregates findings from forge-verifier context entries into a structured summary.
+   */
+  'retro-query'(args) {
+    const projectId = args[0];
+    if (!projectId) {
+      console.error('Usage: forge-tools retro-query <project-id>');
+      process.exit(1);
+    }
+
+    const children = bdJson(`children ${projectId}`);
+    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const phases = issues.filter(i =>
+      (i.labels || []).includes('forge:phase') && i.status === 'closed'
+    );
+
+    const lessons = [];
+    const pitfallFlags = [];
+    const effectivenessRatings = {};
+    let phaseCount = 0;
+
+    for (const phase of phases) {
+      const comments = bdJson(`comments ${phase.id}`);
+      if (!comments) continue;
+
+      const list = Array.isArray(comments) ? comments : (comments.comments || []);
+      let hasRetro = false;
+
+      for (const c of list) {
+        const body = c.body || c.content || c.text || '';
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          continue;
+        }
+
+        if (parsed.agent !== 'forge-verifier' || parsed.status !== 'completed') continue;
+        hasRetro = true;
+
+        // Extract lessons from findings and decisions
+        for (const f of (parsed.findings || [])) {
+          lessons.push({ phase_id: phase.id, phase_title: phase.title, lesson: f });
+        }
+        for (const d of (parsed.decisions || [])) {
+          lessons.push({ phase_id: phase.id, phase_title: phase.title, lesson: d });
+        }
+
+        // Extract pitfalls from blockers
+        for (const b of (parsed.blockers || [])) {
+          pitfallFlags.push({ phase_id: phase.id, phase_title: phase.title, pitfall: b });
+        }
+
+        // Build effectiveness rating from available data
+        const findingsCount = (parsed.findings || []).length;
+        const blockersCount = (parsed.blockers || []).length;
+        effectivenessRatings[phase.id] = {
+          phase_title: phase.title,
+          findings: findingsCount,
+          blockers: blockersCount,
+          rating: blockersCount === 0 ? 'clean' : blockersCount <= 2 ? 'minor_issues' : 'significant_issues',
+        };
+      }
+
+      if (hasRetro) phaseCount++;
+    }
+
+    output({
+      project_id: projectId,
+      phase_count: phaseCount,
+      lessons,
+      pitfall_flags: pitfallFlags,
+      effectiveness_ratings: effectivenessRatings,
+    });
   },
 };
