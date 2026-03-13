@@ -139,108 +139,31 @@ Save the vision as a memory:
 bd remember --key "forge:project:<id>:vision" "<one-line vision>"
 ```
 
-## 4. Create Default Milestone
+## 4. Offer First Milestone Creation
 
-Create a default milestone as a child of the project so that phases have a milestone to attach to:
-
-```bash
-bd create --title="Milestone 1" \
-  --description="Initial milestone for the project. Covers the first set of phases toward v1." \
-  --type=epic --priority=1 --json
-```
-
-Label and wire it:
-```bash
-bd label add <milestone-id> forge:milestone
-bd dep add <milestone-id> <project-id> --type=parent-child
-```
-
-Save for future reference:
-```bash
-bd remember --key "forge:session:last-milestone" "<milestone-id>"
-```
-
-## 5. Define Requirements
-
-Based on the user's v1 description, break it down into 5-12 concrete requirements.
-
-Present the full list to the user for review before creating any beads. Let them add, remove, or modify requirements. Iterate until they approve.
-
-For each approved requirement, check if a bead with the same title already exists before creating:
-```bash
-# Check for existing bead with this title (label forge:req)
-bd search "<requirement title>" --label forge:req --status all --json
-```
-
-- If a match with the exact title is found: skip creation, note "Skipping '<title>' — already exists as <id>", and use the existing ID for any dependency wiring.
-- If no match: create normally.
-
-```bash
-# Only run if no existing match:
-bd create --title="<requirement title>" \
-  --description="<what this requirement means and why it matters>" \
-  --type=feature --priority=<1-3> --json
-bd dep add <req-id> <project-id> --type=parent-child
-bd label add <req-id> forge:req
-```
-
-## 6. Create Phased Roadmap
-
-Resolve the model for the roadmapper agent:
-```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-roadmapper --raw)
-```
-
-Use the Agent tool to spawn **forge-roadmapper** with (pass `model` if non-empty):
-- The project ID, milestone ID (Milestone 1), and vision
-- All requirement IDs with their titles and descriptions
-- Any user-specified constraints on ordering
-
-The roadmapper will analyze requirements and propose 3-8 phases.
-
-Present the proposed phases to the user for review. Let them reorder, merge, split, or rename phases. Iterate until they approve.
-
-Then create the approved phases. For each phase, check if a bead with the same title already exists before creating:
-```bash
-# Check for existing bead with this title (label forge:phase)
-bd search "<Phase N: phase name>" --label forge:phase --status all --json
-```
-
-- If a match with the exact title is found: skip creation, note "Skipping '<title>' — already exists as <id>", and use the existing ID for dependency wiring.
-- If no match: create normally.
-
-```bash
-# Only run if no existing match:
-bd create --title="Phase N: <phase name>" \
-  --description="<phase goal and what it achieves>" \
-  --type=epic --priority=1 --json
-bd dep add <phase-id> <milestone-id> --type=parent-child
-bd label add <phase-id> forge:phase
-
-# Wire phase ordering (each phase blocks the next):
-bd dep add <phase-2-id> <phase-1-id>  # phase 2 depends on phase 1
-bd dep add <phase-3-id> <phase-2-id>  # phase 3 depends on phase 2
-# etc.
-```
-
-## 7. Show Roadmap
-
-Display the full project structure:
-```bash
-bd dep tree <project-id>
-```
-
-Summarize:
-- Project vision (one sentence)
-- Default milestone created (Milestone 1)
-- N requirements defined
-- N phases planned under Milestone 1
-- Phase overview (numbered list with titles)
-- Next step: `/forge:plan` to plan the first phase
-
-Save project ID for future reference:
+Save the project ID for future reference:
 ```bash
 bd remember --key "forge:session:project-id" "<project-id>"
+```
+
+Ask the user if they want to create their first milestone now:
+
+Use AskUserQuestion:
+- header: "First Milestone"
+- question: "Project created! Would you like to set up your first milestone now? This will define requirements, create a roadmap, and get you ready to start building."
+- options:
+  - "Yes, let's go"
+  - "Not now — I'll run /forge:new-milestone later"
+
+**If "Yes":** Invoke `/forge:new-milestone` using the Skill tool. This runs the full
+new-milestone workflow (goal gathering, milestone epic, worktree, requirements, optional
+research, roadmap, summary) — no logic is duplicated.
+
+**If "Not now":** Display summary and stop:
+```
+Project "<product name>" created (<project-id>).
+
+Next step: /forge:new-milestone to define your first milestone.
 ```
 
 </process>
