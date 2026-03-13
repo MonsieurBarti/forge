@@ -441,8 +441,51 @@ module.exports = {
       try {
         const data = JSON.parse(result);
         const issues = Array.isArray(data) ? data : (data.issues || []);
-        if (issues.length > 0) {
-          // One project per repo — return the first (and should be only) project
+        if (issues.length === 1) {
+          // Single project — backward compat, return it directly
+          const project = issues[0];
+          output({ found: true, project_id: project.id, project_title: project.title || project.subject, projects: issues, source: 'beads' });
+          return;
+        }
+        if (issues.length > 1) {
+          // Multiple projects (monorepo) — resolve by cwd longest-prefix match
+          const cwd = process.cwd();
+          const gitRoot = findGitRoot(cwd);
+          if (gitRoot) {
+            const relPath = path.relative(gitRoot, cwd).split(path.sep).join('/');
+            let bestMatch = null;
+            let bestLen = -1;
+            for (const project of issues) {
+              const wp = extractWorkspacePath(project);
+              if (!wp) continue;
+              const normalizedWp = wp.replace(/\/+$/, '');
+              // Check if relPath starts with this workspace_path
+              if (relPath === normalizedWp || relPath.startsWith(normalizedWp + '/')) {
+                if (normalizedWp.length > bestLen) {
+                  bestLen = normalizedWp.length;
+                  bestMatch = project;
+                }
+              }
+            }
+            if (bestMatch) {
+              output({ found: true, project_id: bestMatch.id, project_title: bestMatch.title || bestMatch.subject, projects: issues, source: 'cwd_monorepo' });
+              return;
+            }
+          }
+          // No child matched — return forge:monorepo parent if one exists
+          const monoResult = bd('list --label forge:monorepo --json', { allowFail: true });
+          if (monoResult) {
+            try {
+              const monoData = JSON.parse(monoResult);
+              const monoIssues = Array.isArray(monoData) ? monoData : (monoData.issues || []);
+              if (monoIssues.length > 0) {
+                const mono = monoIssues[0];
+                output({ found: true, project_id: mono.id, project_title: mono.title || mono.subject, projects: issues, source: 'monorepo_parent' });
+                return;
+              }
+            } catch { /* fall through */ }
+          }
+          // Still no match — return first project as last resort
           const project = issues[0];
           output({ found: true, project_id: project.id, project_title: project.title || project.subject, projects: issues, source: 'beads' });
           return;
