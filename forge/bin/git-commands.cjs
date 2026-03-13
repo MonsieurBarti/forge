@@ -32,7 +32,7 @@ module.exports = {
 
     fs.mkdirSync(path.dirname(wtPath), { recursive: true });
 
-    const branches = git('branch --list ' + branch, { allowFail: true });
+    const branches = git(['branch', '--list', branch], { allowFail: true });
     if (!branches) {
       git(['branch', branch], { allowFail: true });
     }
@@ -111,7 +111,7 @@ module.exports = {
       ? `forge/m-${milestoneId}-phase-${phaseId}`
       : `forge/phase-${phaseId}`;
 
-    const existing = git('branch --list ' + branch, { allowFail: true });
+    const existing = git(['branch', '--list', branch], { allowFail: true });
     if (existing) {
       git(['checkout', branch]);
       output({ created: false, branch, reason: 'already_exists' });
@@ -226,6 +226,7 @@ module.exports = {
       output({ created: true, url: prUrl, branch, base, title });
     } catch (err) {
       output({ created: false, error: err.message, branch, base });
+      process.exit(1);
     }
   },
 };

@@ -12,7 +12,8 @@ batch-apply all approved fixes. Capped at 1 round of fixes -- no recursive re-au
 Determine which files have changed on this branch relative to main:
 
 ```bash
-CHANGED_FILES=$(git diff main...HEAD --name-only)
+BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null)
+CHANGED_FILES=$(git diff --name-only "$BASE"..HEAD)
 ```
 
 If `CHANGED_FILES` is empty, report that there are no changes to audit and stop.

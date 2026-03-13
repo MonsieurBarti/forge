@@ -207,6 +207,7 @@ Automated fixes from pre-PR quality audit (security, code review, performance)."
   additional commits.
 
 ## 5.5. Push Branch and Create Pull Request
+<!-- Note: step 5.5 continues the 5.x sub-step series after 5.1 (retrospective) and 5.2 (quality gate) -->
 
 After the phase is closed (all tasks verified), push the phase branch and open a PR for
 user review. Forge NEVER merges — the user reviews, approves, and merges the PR themselves.

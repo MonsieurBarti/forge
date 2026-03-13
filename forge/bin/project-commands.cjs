@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const {
   bd, bdArgs, bdJson, output,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
@@ -56,6 +57,58 @@ function collectProjectIssues(projectId) {
   addIssues(issues);
 
   return { milestones, phases, requirements };
+}
+
+/**
+ * Build per-phase task details for a list of phases.
+ * Returns an array of phase detail objects with task breakdown.
+ * includeFull=true includes description/acceptance_criteria on tasks.
+ */
+function buildPhaseDetails(phases, includeFull = false) {
+  const phaseDetails = [];
+  for (const phase of phases) {
+    const phaseChildren = bdJson(`children ${phase.id}`);
+    const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+    const detail = {
+      id: phase.id,
+      title: phase.title,
+      status: phase.status,
+      tasks_total: tasks.length,
+      tasks_open: tasks.filter(t => t.status === 'open').length,
+      tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
+      tasks_closed: tasks.filter(t => t.status === 'closed').length,
+    };
+    if (includeFull) {
+      detail.description = phase.description || '';
+      detail.tasks = tasks.map(t => ({ id: t.id, title: t.title, status: t.status, description: t.description || '', acceptance_criteria: t.acceptance_criteria || '' }));
+    } else {
+      detail.tasks = tasks.map(t => ({ id: t.id, title: t.title, status: t.status }));
+    }
+    phaseDetails.push(detail);
+  }
+  return phaseDetails;
+}
+
+/**
+ * Build requirement coverage data for a list of requirements.
+ * Returns an array of { id, title, covered, covering_tasks } objects.
+ */
+function buildReqCoverage(requirements) {
+  const reqCoverage = [];
+  for (const req of requirements) {
+    const depsRaw = bdArgs(['dep', 'list', req.id, '--direction=up', '--type', 'validates', '--json'], { allowFail: true });
+    let deps = [];
+    if (depsRaw) {
+      try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+    }
+    reqCoverage.push({
+      id: req.id,
+      title: req.title,
+      covered: Array.isArray(deps) && deps.length > 0,
+      covering_tasks: Array.isArray(deps) ? deps.length : 0,
+    });
+  }
+  return reqCoverage;
 }
 
 // generateDashboardHTML and esc are inlined here since they are only used in generate-dashboard.
@@ -157,6 +210,7 @@ function generateDashboardHTML(data) {
 <title>${esc(projectTitle)} — Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- TODO: add integrity="sha384-..." crossorigin="anonymous" for SRI once hash is pinned -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"><\/script>
 <style>
   :root {
@@ -332,7 +386,7 @@ module.exports = {
       console.error('Usage: forge-tools remember <text>');
       process.exit(1);
     }
-    bd(`remember ${memory}`);
+    bdArgs(['remember', memory]);
     output({ ok: true, memory });
   },
 
@@ -407,37 +461,8 @@ module.exports = {
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
 
-    const phaseDetails = [];
-    for (const phase of phases) {
-      const phaseChildren = bdJson(`children ${phase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
-
-      phaseDetails.push({
-        id: phase.id,
-        title: phase.title,
-        status: phase.status,
-        tasks_total: tasks.length,
-        tasks_open: tasks.filter(t => t.status === 'open').length,
-        tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
-        tasks_closed: tasks.filter(t => t.status === 'closed').length,
-        tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
-      });
-    }
-
-    const reqCoverage = [];
-    for (const req of requirements) {
-      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
-      let deps = [];
-      if (depsRaw) {
-        try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
-      }
-      reqCoverage.push({
-        id: req.id,
-        title: req.title,
-        covered: Array.isArray(deps) && deps.length > 0,
-        covering_tasks: Array.isArray(deps) ? deps.length : 0,
-      });
-    }
+    const phaseDetails = buildPhaseDetails(phases);
+    const reqCoverage = buildReqCoverage(requirements);
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
@@ -478,22 +503,7 @@ module.exports = {
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
 
-    const phaseDetails = [];
-    for (const phase of phases) {
-      const phaseChildren = bdJson(`children ${phase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
-      phaseDetails.push({
-        id: phase.id,
-        title: phase.title,
-        description: phase.description || '',
-        status: phase.status,
-        tasks_total: tasks.length,
-        tasks_open: tasks.filter(t => t.status === 'open').length,
-        tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
-        tasks_closed: tasks.filter(t => t.status === 'closed').length,
-        tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, description: t.description || '', acceptance_criteria: t.acceptance_criteria || '' })),
-      });
-    }
+    const phaseDetails = buildPhaseDetails(phases, true);
 
     phaseDetails.sort((a, b) => {
       const numA = parseFloat((a.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
@@ -501,18 +511,7 @@ module.exports = {
       return numA - numB;
     });
 
-    const reqCoverage = [];
-    for (const req of requirements) {
-      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
-      let deps = [];
-      if (depsRaw) { try { deps = JSON.parse(depsRaw); } catch { /* ignore */ } }
-      reqCoverage.push({
-        id: req.id,
-        title: req.title,
-        covered: Array.isArray(deps) && deps.length > 0,
-        covering_tasks: Array.isArray(deps) ? deps.length : 0,
-      });
-    }
+    const reqCoverage = buildReqCoverage(requirements);
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
@@ -533,7 +532,8 @@ module.exports = {
 
     const diagDir = path.join(process.cwd(), '.forge');
     fs.mkdirSync(diagDir, { recursive: true });
-    const filePath = path.join(diagDir, `forge-dashboard-${projectId}.html`);
+    const safeId = projectId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const filePath = path.join(diagDir, `forge-dashboard-${safeId}.html`);
     fs.writeFileSync(filePath, html, 'utf8');
 
     output({ path: filePath, projectId, timestamp });
@@ -682,11 +682,14 @@ module.exports = {
       fix_targets: unlabeledPhases.map(p => p.id),
     });
 
+    // Cache phase children to avoid redundant bdJson calls in subsequent loops.
+    const phaseTasksCache = new Map();
     const allTasks = [];
     const unlabeledTasks = [];
     for (const phase of phases) {
       const phaseChildren = bdJson(`children ${phase.id}`);
       const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      phaseTasksCache.set(phase.id, tasks);
       for (const t of tasks) {
         allTasks.push({ ...t, phase_id: phase.id });
         if (!(t.labels || []).includes('forge:task') && !(t.labels || []).includes('forge:research')) {
@@ -726,8 +729,8 @@ module.exports = {
     const closedPhasesWithOpenTasks = [];
     const closeablePhases = [];
     for (const phase of phases) {
-      const phaseChildren = bdJson(`children ${phase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      // Reuse cached children to avoid a second bdJson call per phase.
+      const tasks = phaseTasksCache.get(phase.id) || [];
       const openTasks = tasks.filter(t => t.status !== 'closed');
 
       if (phase.status === 'closed' && openTasks.length > 0) {
@@ -766,21 +769,37 @@ module.exports = {
     const numericKeys = ['context_warning', 'context_critical'];
     const booleanKeys = ['update_check', 'auto_research'];
 
+    // Fetch all kv values in one call and filter in-memory to avoid N individual get calls.
+    const kvListRaw = bdArgs(['kv', 'list', '--json'], { allowFail: true });
+    let kvMap = {};
+    if (kvListRaw) {
+      try {
+        const parsed = JSON.parse(kvListRaw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) kvMap[item.key] = item.value;
+        } else if (parsed && typeof parsed === 'object') {
+          kvMap = parsed;
+        }
+      } catch { /* ignore */ }
+    }
+
     for (const key of numericKeys) {
-      const val = bd(`kv get forge.${key}`, { allowFail: true });
-      if (val && val.trim() !== '') {
-        const num = parseFloat(val.trim());
+      const fullKey = `forge.${key}`;
+      const val = kvMap[fullKey];
+      if (val !== undefined && String(val).trim() !== '') {
+        const num = parseFloat(String(val).trim());
         if (isNaN(num) || num < 0 || num > 1) {
-          configIssues.push({ key: `forge.${key}`, value: val.trim(), reason: 'must be a number between 0 and 1' });
+          configIssues.push({ key: fullKey, value: String(val).trim(), reason: 'must be a number between 0 and 1' });
         }
       }
     }
 
     for (const key of booleanKeys) {
-      const val = bd(`kv get forge.${key}`, { allowFail: true });
-      if (val && val.trim() !== '') {
-        if (!['true', 'false'].includes(val.trim().toLowerCase())) {
-          configIssues.push({ key: `forge.${key}`, value: val.trim(), reason: 'must be true or false' });
+      const fullKey = `forge.${key}`;
+      const val = kvMap[fullKey];
+      if (val !== undefined && String(val).trim() !== '') {
+        if (!['true', 'false'].includes(String(val).trim().toLowerCase())) {
+          configIssues.push({ key: fullKey, value: String(val).trim(), reason: 'must be true or false' });
         }
       }
     }
@@ -856,8 +875,7 @@ module.exports = {
       severity: globalSettingsOk ? 'ok' : 'warning',
     });
 
-    const { homedir } = require('os');
-    const forgeDir = path.join(homedir(), '.claude', 'forge');
+    const forgeDir = path.join(os.homedir(), '.claude', 'forge');
 
     const expectedFiles = [
       { path: 'bin/forge-tools.cjs', label: 'forge-tools.cjs' },
@@ -867,7 +885,11 @@ module.exports = {
       { path: 'workflows/verify.md', label: 'verify workflow' },
       { path: 'workflows/progress.md', label: 'progress workflow' },
       { path: 'workflows/health.md', label: 'health workflow' },
+      { path: 'workflows/quality-gate.md', label: 'quality-gate workflow' },
       { path: 'references/conventions.md', label: 'conventions reference' },
+      { path: '../agents/forge-security-auditor.md', label: 'forge-security-auditor agent' },
+      { path: '../agents/forge-code-reviewer.md', label: 'forge-code-reviewer agent' },
+      { path: '../agents/forge-performance-auditor.md', label: 'forge-performance-auditor agent' },
     ];
 
     const missingFiles = [];
@@ -1091,6 +1113,9 @@ module.exports = {
         clearNestedKey(existing, topKey, subKey);
         fs.writeFileSync(projectPath, toSimpleYaml(existing));
       } catch { /* file doesn't exist */ }
+    } else {
+      console.error('Scope must be "global" or "project"');
+      process.exit(1);
     }
 
     output({ ok: true, scope, key, cleared: true });
@@ -1116,36 +1141,41 @@ module.exports = {
       process.exit(1);
     }
 
+    // Read settings file once before the loop, apply all mutations in-memory, write once after.
+    let bulkExisting = {};
+    let bulkBody = '';
+    let bulkProjectPath = null;
+
+    if (scope === 'global') {
+      try {
+        const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+        bulkExisting = parseFrontmatter(text);
+        const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+        if (bodyMatch) bulkBody = bodyMatch[1];
+      } catch { /* new file */ }
+    } else if (scope === 'project') {
+      bulkProjectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      try {
+        bulkExisting = parseSimpleYaml(fs.readFileSync(bulkProjectPath, 'utf8'));
+      } catch { /* new file */ }
+    }
+
     const results = [];
     for (const [key, value] of Object.entries(updates)) {
       if (!(key in SETTINGS_DEFAULTS)) continue;
       let parsedValue = value;
       if (value === 'true') parsedValue = true;
       else if (value === 'false') parsedValue = false;
-
-      if (scope === 'global') {
-        let existing = {};
-        let body = '';
-        try {
-          const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-          existing = parseFrontmatter(text);
-          const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
-          if (bodyMatch) body = bodyMatch[1];
-        } catch { /* new file */ }
-        existing[key] = parsedValue;
-        writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
-      } else if (scope === 'project') {
-        const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-        let existing = {};
-        try {
-          existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-        } catch { /* new file */ }
-        existing[key] = parsedValue;
-        const dir = path.dirname(projectPath);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(projectPath, toSimpleYaml(existing));
-      }
+      bulkExisting[key] = parsedValue;
       results.push({ key, value: parsedValue });
+    }
+
+    if (scope === 'global') {
+      writeFrontmatter(GLOBAL_SETTINGS_PATH, bulkExisting, bulkBody);
+    } else if (scope === 'project') {
+      const dir = path.dirname(bulkProjectPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(bulkProjectPath, toSimpleYaml(bulkExisting));
     }
 
     output({ ok: true, scope, updated: results });
@@ -1193,9 +1223,10 @@ module.exports = {
     const overrides = loadModelOverrides();
     const agents = Object.keys(MODEL_PROFILES);
 
+    // Pass pre-loaded overrides and profile to avoid redundant file reads per agent.
     const effective = {};
     for (const agent of agents) {
-      const result = resolveAgentModel(agent);
+      const result = resolveAgentModel(agent, overrides, profile);
       effective[agent] = result;
     }
 
@@ -1218,7 +1249,7 @@ module.exports = {
       process.exit(1);
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
-    const value = bd(`kv get ${fullKey}`, { allowFail: true });
+    const value = bdArgs(['kv', 'get', fullKey], { allowFail: true });
     output({ key: fullKey, value: value || null });
   },
 
@@ -1233,7 +1264,7 @@ module.exports = {
       process.exit(1);
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
-    bd(`kv set ${fullKey} ${value}`);
+    bdArgs(['kv', 'set', fullKey, value]);
     output({ ok: true, key: fullKey, value });
   },
 
@@ -1275,7 +1306,7 @@ module.exports = {
       process.exit(1);
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
-    bd(`kv clear ${fullKey}`, { allowFail: true });
+    bdArgs(['kv', 'clear', fullKey], { allowFail: true });
     output({ ok: true, key: fullKey, cleared: true });
   },
 
@@ -1312,7 +1343,7 @@ module.exports = {
     const description = args.slice(1).join(' ') || '';
     const title = `Debug: ${slug}`;
 
-    const result = bd(`create --title="${title}" --description="${description}" --type=task --json`);
+    const result = bdArgs(['create', `--title=${title}`, `--description=${description}`, '--type=task', '--json']);
     if (!result) {
       console.error('Failed to create debug bead');
       process.exit(1);
@@ -1356,7 +1387,7 @@ module.exports = {
     } else if (field === 'design') {
       bd(`update ${id} --design="${value.replace(/"/g, '\\"')}"`, { allowFail: true });
     } else if (field === 'status') {
-      bd(`update ${id} --status=${value}`, { allowFail: true });
+      bdArgs(['update', id, `--status=${value}`], { allowFail: true });
     } else {
       console.error(`Unknown field: ${field}. Use: notes, design, status`);
       process.exit(1);
@@ -1411,7 +1442,7 @@ module.exports = {
     if (files) descParts.push(`Files: ${files}`);
     const fullDesc = descParts.filter(Boolean).join('\n');
 
-    const result = bd(`create --title="${title.replace(/"/g, '\\"')}" --description="${fullDesc.replace(/"/g, '\\"')}" --type=task --priority=3 --json`);
+    const result = bdArgs(['create', `--title=${title}`, `--description=${fullDesc}`, '--type=task', '--priority=3', '--json']);
     if (!result) {
       console.error('Failed to create todo bead');
       process.exit(1);
