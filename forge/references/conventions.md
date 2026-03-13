@@ -14,6 +14,7 @@ This document defines how Forge uses beads to represent project management conce
 | `forge:research` | Task bead | Research output for a phase |
 | `forge:quick` | Task bead | A quick task (ad-hoc, outside phase roadmap) |
 | `forge:debug` | Task bead | Active debug session (via /forge:debug) |
+| `forge:monorepo` | Monorepo epic | Top-level monorepo container (parent of child `forge:project` beads) |
 
 ## Bead Types
 
@@ -26,6 +27,7 @@ This document defines how Forge uses beads to represent project management conce
 | Task | `task` | phase epic | description (what), acceptance_criteria (done when), estimated_minutes |
 | Research | `task` | phase epic | notes (findings) |
 | Debug Session | `task` | none | description (symptoms), notes (investigation state), design (resolution) |
+| Monorepo | `epic` | none | description (vision), design (workspace_path mapping as YAML) |
 
 ## Dependency Patterns
 
@@ -58,6 +60,29 @@ All beads are connected to their parent via `parent-child`:
 phase-1 depends on project (parent-child)
 task-1a depends on phase-1 (parent-child)
 ```
+
+### Monorepo Hierarchy
+A `forge:monorepo` bead is the top-level parent for repositories containing multiple
+applications or packages. Each application gets its own `forge:project` child bead.
+
+```
+monorepo-abc depends on nothing (top-level)
+project-app1 depends on monorepo-abc (parent-child)
+project-app2 depends on monorepo-abc (parent-child)
+```
+
+The monorepo bead's `design` field stores workspace paths as YAML, mapping each child
+project to its directory within the repository:
+
+```yaml
+workspace_paths:
+  <project-id>: packages/app1
+  <project-id>: apps/backend
+```
+
+Each child `forge:project` bead operates normally (has its own phases, tasks, etc.) but
+is scoped to its `workspace_path`. The monorepo bead itself has no phases or tasks --
+it exists solely as a grouping parent.
 
 ### Discovery Links
 When work on one task reveals new work needed:
