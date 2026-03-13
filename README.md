@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/forge-banner.png" alt="Forge — Project orchestration for Claude Code" width="100%" />
+
 # Forge
 
 **Project orchestration for Claude Code, backed by [beads](https://github.com/steveyegge/beads).**
