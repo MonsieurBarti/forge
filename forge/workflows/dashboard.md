@@ -15,15 +15,7 @@ Parse `project.id` from the result. If no project found, suggest `/forge:new`.
 
 If a project ID was given as argument, use it directly.
 
-## 2. Load Full Progress
-
-```bash
-PROGRESS=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" full-progress <project-id>)
-```
-
-This returns JSON with: project info, progress summary, phases with tasks, requirement coverage.
-
-## 3. Generate HTML Dashboard
+## 2. Generate HTML Dashboard
 
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" generate-dashboard <project-id>
@@ -42,7 +34,7 @@ The HTML follows the visual-explainer aesthetic:
 - Chart.js for progress visualization
 - No `.node` CSS class
 
-## 4. Open in Browser
+## 3. Open in Browser
 
 ```bash
 open <html-file-path>
