@@ -80,7 +80,7 @@ MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-resea
 
 Before spawning the researcher, query for retrospective data from similar past phases:
 ```bash
-RETRO=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" retro-query <phase-id>)
+RETRO=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" retro-query <project-id>)
 ```
 
 Parse the JSON result. If `similar_phases` is non-empty, build a `RETRO_SECTION` string:
@@ -261,6 +261,7 @@ Project: <project-id>
 Research findings: <findings from step 3 — bullet list from structured JSON or free-text fallback; omit section if no research was done>
 Complexity estimate: <from structured context decisions field if available>
 User decisions: <approach decisions from step 4>
+Retrospective insights: <if RETRO_SECTION from step 3 is non-empty, include lessons and pitfall flags here; otherwise omit this line>
 Requirements addressed by this phase: <relevant requirement IDs and titles>
 
 <if MILESTONE_REQS is non-empty, include this section — otherwise omit it entirely>
