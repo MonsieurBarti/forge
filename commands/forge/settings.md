@@ -53,6 +53,7 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-clear global KEY
 | `auto_research` | `true` | Auto-run research before planning |
 | `plan_check` | `true` | Run plan checker to validate plans |
 | `parallel_execution` | `true` | Execute independent tasks in parallel |
+| `quality_gate` | `true` | Run pre-PR quality pipeline (security, code review, performance audits) |
 
 **Override layers** (highest priority wins):
 1. Per-project: `.forge/settings.yaml`
