@@ -160,14 +160,13 @@ function restartDolt() {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     // Give Dolt a moment to become ready
-    execFileSync('sleep', ['2']);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
   } catch (_) {
     // Ignore restart errors; the retry will surface the real failure
   }
 }
 
-function bd(args, opts = {}) {
-  const argList = args.split(/\s+/);
+function _bdExec(argList, opts = {}) {
   const _retry = opts._retry || false;
   try {
     const result = execFileSync('bd', argList, {
@@ -180,11 +179,20 @@ function bd(args, opts = {}) {
   } catch (err) {
     if (!_retry && isDoltConnectionError(err)) {
       restartDolt();
-      return bd(args, { ...opts, _retry: true });
+      return _bdExec(argList, { ...opts, _retry: true });
     }
     if (opts.allowFail) return '';
     throw err;
   }
+}
+
+function bd(args, opts = {}) {
+  const argList = Array.isArray(args) ? args : args.split(/\s+/);
+  return _bdExec(argList, opts);
+}
+
+function bdArgs(argList, opts = {}) {
+  return _bdExec(argList, opts);
 }
 
 function git(args, opts = {}) {
@@ -203,26 +211,6 @@ function git(args, opts = {}) {
   }
 }
 
-function bdArgs(argList, opts = {}) {
-  const _retry = opts._retry || false;
-  try {
-    const result = execFileSync('bd', argList, {
-      encoding: 'utf8',
-      timeout: 10000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      ...opts,
-    });
-    return result.trim();
-  } catch (err) {
-    if (!_retry && isDoltConnectionError(err)) {
-      restartDolt();
-      return bdArgs(argList, { ...opts, _retry: true });
-    }
-    if (opts.allowFail) return '';
-    throw err;
-  }
-}
-
 function bdJson(args) {
   if (Array.isArray(args)) {
     const raw = bdArgs([...args, '--json']);
@@ -230,6 +218,7 @@ function bdJson(args) {
     try {
       return JSON.parse(raw);
     } catch {
+      console.error('[bdJson] Parse failure for:', args, 'raw:', raw);
       return null;
     }
   }
@@ -242,6 +231,7 @@ function bdJson(args) {
     }
     return parsed;
   } catch {
+    console.error('[bdJson] Parse failure for:', args, 'raw:', raw);
     return null;
   }
 }
@@ -361,11 +351,15 @@ function resolveSettings(cwd) {
 
 // --- Model Resolution ---
 
+let _modelProfileCache = null;
+let _modelOverridesCache = null;
+
 /**
  * Load the active model profile name from settings layers.
  * Resolution: project model_profile > global model_profile > 'balanced'
  */
 function loadModelProfile() {
+  if (_modelProfileCache !== null) return _modelProfileCache;
   let profile = null;
 
   // Global layer
@@ -388,7 +382,8 @@ function loadModelProfile() {
     profile = null;
   }
 
-  return profile || DEFAULT_MODEL_PROFILE;
+  _modelProfileCache = profile || DEFAULT_MODEL_PROFILE;
+  return _modelProfileCache;
 }
 
 /**
@@ -396,6 +391,7 @@ function loadModelProfile() {
  * Returns merged map: { 'forge-planner': 'haiku', ... }
  */
 function loadModelOverrides() {
+  if (_modelOverridesCache !== null) return _modelOverridesCache;
   let overrides = {};
 
   // Global layer
@@ -416,7 +412,8 @@ function loadModelOverrides() {
     }
   } catch { /* no project settings */ }
 
-  return overrides;
+  _modelOverridesCache = overrides;
+  return _modelOverridesCache;
 }
 
 /**

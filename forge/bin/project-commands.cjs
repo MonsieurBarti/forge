@@ -507,7 +507,7 @@ module.exports = {
       console.error('Usage: forge-tools remember <text>');
       process.exit(1);
     }
-    bdArgs(['remember', memory]);
+    bdArgs(['remember', ...args]);
     output({ ok: true, memory });
   },
 
@@ -626,18 +626,15 @@ module.exports = {
 
     const phaseDetails = buildPhaseDetails(phases, true);
 
-    phaseDetails.sort((a, b) => {
-      const numA = parseFloat((a.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
-      const numB = parseFloat((b.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
-      return numA - numB;
-    });
+    for (const pd of phaseDetails) {
+      pd._sortKey = parseFloat((pd.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
+    }
+    phaseDetails.sort((a, b) => a._sortKey - b._sortKey);
 
     const reqCoverage = buildReqCoverage(requirements);
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
-    const phasesInProgress = phases.filter(p => p.status === 'in_progress');
-    const blockedPhases = phases.filter(p => p.status === 'blocked');
     const progressPercent = totalPhases > 0 ? Math.round((completedPhases / totalPhases) * 100) : 0;
 
     const projectTitle = project?.title || projectId;
@@ -645,7 +642,7 @@ module.exports = {
 
     const data = {
       projectTitle, projectId, timestamp, progressPercent,
-      totalPhases, completedPhases, phasesInProgress, blockedPhases,
+      totalPhases, completedPhases,
       phaseDetails, reqCoverage,
     };
 
@@ -700,7 +697,7 @@ module.exports = {
       tasks_in_progress: inProgressTasks,
     };
 
-    const memoryKey = `forge:session:state`;
+    const memoryKey = 'forge:session:state';
     const memoryValue = `${timestamp} project=${projectId} phase=${sessionData.current_phase || 'none'} progress=${completedPhases}/${phases.length} in_flight=${inProgressTasks.map(t => t.id).join(',')}`;
     bdArgs(['remember', '--key', memoryKey, memoryValue], { allowFail: true });
 
@@ -1504,10 +1501,15 @@ module.exports = {
     }
 
     if (field === 'notes') {
-      bd(`update ${id} --notes="${value.replace(/"/g, '\\"')}"`, { allowFail: true });
+      bdArgs(['update', id, `--notes=${value}`], { allowFail: true });
     } else if (field === 'design') {
-      bd(`update ${id} --design="${value.replace(/"/g, '\\"')}"`, { allowFail: true });
+      bdArgs(['update', id, `--design=${value}`], { allowFail: true });
     } else if (field === 'status') {
+      const validStatuses = ['open', 'in_progress', 'closed', 'blocked', 'deferred'];
+      if (!validStatuses.includes(value)) {
+        console.error(`Invalid status: ${value}. Must be one of: ${validStatuses.join(', ')}`);
+        process.exit(1);
+      }
       bdArgs(['update', id, `--status=${value}`], { allowFail: true });
     } else {
       console.error(`Unknown field: ${field}. Use: notes, design, status`);

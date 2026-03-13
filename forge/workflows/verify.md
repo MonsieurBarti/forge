@@ -188,8 +188,7 @@ Parse the result and read the `quality_gate` value.
 
 Determine which files were changed in this phase branch relative to the base branch:
 ```bash
-BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null)
-CHANGED_FILES=$(git diff --name-only "$BASE"..HEAD)
+CHANGED_FILES=$(git diff main...HEAD --name-only)
 ```
 
 If no files were changed, skip the quality gate silently.
