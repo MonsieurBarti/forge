@@ -433,6 +433,105 @@ function getRequirementCoverage(requirements) {
  * Returns an array of { name, description, color, vibe } objects.
  * Looks for agents/ directory relative to the git root, falling back to cwd.
  */
+/**
+ * Compute cost estimate for a phase based on historical sibling phase costs.
+ * Shared logic used by both `status` and `cost-estimate` commands.
+ * Returns { estimated_cost_usd, avg_cost_per_task, task_count, historical_phases_used, confidence }
+ */
+function computeCostEstimate(phaseId) {
+  const phase = bdJson(`show ${phaseId}`);
+  if (!phase) return { estimated_cost_usd: null, avg_cost_per_task: null, task_count: 0, historical_phases_used: 0, confidence: 'none' };
+
+  // Find parent milestone/project
+  const depUpRaw = bd(`dep list ${phaseId} --direction=up --type=parent-child --json`, { allowFail: true });
+  let parentId = null;
+  if (depUpRaw) {
+    try {
+      const deps = JSON.parse(depUpRaw);
+      const depList = Array.isArray(deps) ? deps : (deps.dependencies || deps.issues || []);
+      for (const dep of depList) {
+        const depId = dep.dependency_id || dep.id || dep;
+        if (typeof depId === 'string') {
+          const parentBead = bdJson(`show ${depId}`);
+          if (parentBead) {
+            const labels = parentBead.labels || [];
+            if (labels.includes('forge:milestone') || labels.includes('forge:project')) {
+              parentId = depId;
+              break;
+            }
+          }
+        }
+      }
+    } catch { /* parse error */ }
+  }
+
+  // Get sibling closed phases
+  let siblingPhases = [];
+  if (parentId) {
+    const siblings = normalizeChildren(bdJson(`children ${parentId}`));
+    siblingPhases = siblings.filter(i =>
+      (i.labels || []).includes('forge:phase') &&
+      i.status === 'closed' &&
+      i.id !== phaseId
+    );
+  }
+
+  // Query cost data for completed siblings
+  const historicalCosts = [];
+  for (const sibling of siblingPhases) {
+    const costRaw = bdArgs(['kv', 'get', `forge.cost.${sibling.id}`], { allowFail: true });
+    if (!costRaw || costRaw.includes('(not set)')) continue;
+    try {
+      const costData = JSON.parse(costRaw.trim());
+      if (costData && typeof costData.total_usd === 'number' && costData.total_usd > 0) {
+        let taskCount = costData.task_count;
+        if (typeof taskCount !== 'number') {
+          const phaseChildren = normalizeChildren(bdJson(`children ${sibling.id}`));
+          taskCount = phaseChildren.filter(c => (c.labels || []).includes('forge:task')).length;
+        }
+        if (taskCount > 0) {
+          historicalCosts.push({ phase_id: sibling.id, total_usd: costData.total_usd, task_count: taskCount });
+        }
+      }
+    } catch { /* invalid JSON */ }
+  }
+
+  // Count tasks in target phase
+  const targetChildren = normalizeChildren(bdJson(`children ${phaseId}`));
+  const targetTasks = targetChildren.filter(c => (c.labels || []).includes('forge:task'));
+  const taskCount = targetTasks.length;
+
+  const historicalCount = historicalCosts.length;
+  let confidence;
+  if (historicalCount === 0) confidence = 'none';
+  else if (historicalCount <= 2) confidence = 'low';
+  else if (historicalCount <= 5) confidence = 'medium';
+  else confidence = 'high';
+
+  if (taskCount === 0) {
+    const avgCpt = historicalCount > 0
+      ? Math.round((historicalCosts.reduce((sum, h) => sum + h.total_usd / h.task_count, 0) / historicalCount) * 100) / 100
+      : null;
+    return { estimated_cost_usd: 0, avg_cost_per_task: avgCpt, task_count: 0, historical_phases_used: historicalCount, confidence };
+  }
+
+  if (historicalCount === 0) {
+    return { estimated_cost_usd: null, avg_cost_per_task: null, task_count: taskCount, historical_phases_used: 0, confidence: 'none' };
+  }
+
+  const totalCostPerTask = historicalCosts.reduce((sum, h) => sum + h.total_usd / h.task_count, 0);
+  const avgCostPerTask = totalCostPerTask / historicalCount;
+  const estimatedCost = Math.round(avgCostPerTask * taskCount * 100) / 100;
+
+  return {
+    estimated_cost_usd: estimatedCost,
+    avg_cost_per_task: Math.round(avgCostPerTask * 100) / 100,
+    task_count: taskCount,
+    historical_phases_used: historicalCount,
+    confidence,
+  };
+}
+
 function collectAgentRoster() {
   const gitRoot = findGitRoot(process.cwd());
   const searchDirs = [];
@@ -2800,17 +2899,13 @@ module.exports = {
       }
     }
 
-    // 6. Estimate remaining cost (simple heuristic: average cost per task * remaining tasks)
+    // 6. Estimate remaining cost using cost-estimate logic
     let estimatedRemainingUsd = null;
-    if (phaseCostUsd !== null && tasks.done > 0) {
-      const costPerTask = phaseCostUsd / tasks.done;
-      const remaining = tasks.ready + tasks.in_progress + tasks.blocked;
-      estimatedRemainingUsd = Math.round(costPerTask * remaining * 100) / 100;
-    } else if (sessionCostUsd !== null && tasks.done > 0 && tasks.total > 0) {
-      // Fallback: use session cost to estimate
-      const costPerTask = sessionCostUsd / tasks.done;
-      const remaining = tasks.ready + tasks.in_progress + tasks.blocked;
-      estimatedRemainingUsd = Math.round(costPerTask * remaining * 100) / 100;
+    if (currentPhase) {
+      const estimate = computeCostEstimate(currentPhase.id);
+      if (estimate.estimated_cost_usd !== null) {
+        estimatedRemainingUsd = estimate.estimated_cost_usd;
+      }
     }
 
     // 7. Determine suggested next action (same logic as forge:progress)
@@ -2980,134 +3075,12 @@ module.exports = {
       forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools cost-estimate <phase-id>');
     }
 
-    // 1. Verify the phase exists
     const phase = bdJson(`show ${phaseId}`);
     if (!phase) {
       forgeError('NOT_FOUND', `Phase not found: ${phaseId}`, 'Verify the phase ID with: forge-tools list-phases <project-id>', { phaseId });
     }
 
-    // 2. Find the parent milestone (or project) by navigating up
-    const depUpRaw = bd(`dep list ${phaseId} --direction=up --type=parent-child --json`, { allowFail: true });
-    let parentId = null;
-    if (depUpRaw) {
-      try {
-        const deps = JSON.parse(depUpRaw);
-        const depList = Array.isArray(deps) ? deps : (deps.dependencies || deps.issues || []);
-        for (const dep of depList) {
-          const depId = dep.dependency_id || dep.id || dep;
-          if (typeof depId === 'string') {
-            const parentBead = bdJson(`show ${depId}`);
-            if (parentBead) {
-              const labels = parentBead.labels || [];
-              if (labels.includes('forge:milestone') || labels.includes('forge:project')) {
-                parentId = depId;
-                break;
-              }
-            }
-          }
-        }
-      } catch { /* parse error - continue without parent */ }
-    }
-
-    // 3. Get sibling phases from the parent
-    let siblingPhases = [];
-    if (parentId) {
-      const siblings = normalizeChildren(bdJson(`children ${parentId}`));
-      siblingPhases = siblings.filter(i =>
-        (i.labels || []).includes('forge:phase') &&
-        i.status === 'closed' &&
-        i.id !== phaseId
-      );
-    }
-
-    // 4. Query cost data for each completed sibling phase
-    const historicalCosts = [];
-    for (const sibling of siblingPhases) {
-      const costRaw = bdArgs(['kv', 'get', `forge.cost.${sibling.id}`], { allowFail: true });
-      if (!costRaw || costRaw.includes('(not set)')) continue;
-      try {
-        const costData = JSON.parse(costRaw.trim());
-        if (costData && typeof costData.total_usd === 'number' && costData.total_usd > 0) {
-          // Determine task count: prefer stored task_count, fall back to counting children
-          let taskCount = costData.task_count;
-          if (typeof taskCount !== 'number') {
-            const phaseChildren = normalizeChildren(bdJson(`children ${sibling.id}`));
-            taskCount = phaseChildren.filter(c => (c.labels || []).includes('forge:task')).length;
-          }
-          if (taskCount > 0) {
-            historicalCosts.push({
-              phase_id: sibling.id,
-              phase_title: sibling.title,
-              total_usd: costData.total_usd,
-              task_count: taskCount,
-            });
-          }
-        }
-      } catch { /* invalid JSON in kv - skip */ }
-    }
-
-    // 5. Count tasks in the target phase
-    const targetChildren = normalizeChildren(bdJson(`children ${phaseId}`));
-    const targetTasks = targetChildren.filter(c => (c.labels || []).includes('forge:task'));
-    const taskCount = targetTasks.length;
-
-    // 6. Compute estimate
-    const historicalCount = historicalCosts.length;
-
-    // Confidence based on sample size
-    let confidence;
-    if (historicalCount === 0) {
-      confidence = 'none';
-    } else if (historicalCount <= 2) {
-      confidence = 'low';
-    } else if (historicalCount <= 5) {
-      confidence = 'medium';
-    } else {
-      confidence = 'high';
-    }
-
-    // Handle zero tasks: estimated cost is 0
-    if (taskCount === 0) {
-      output({
-        phase_id: phaseId,
-        estimated_cost_usd: 0,
-        avg_cost_per_task: historicalCount > 0
-          ? Math.round((historicalCosts.reduce((sum, h) => sum + h.total_usd / h.task_count, 0) / historicalCount) * 100) / 100
-          : null,
-        task_count: 0,
-        historical_phases_used: historicalCount,
-        confidence,
-      });
-      return;
-    }
-
-    // No historical data: return null estimate
-    if (historicalCount === 0) {
-      output({
-        phase_id: phaseId,
-        estimated_cost_usd: null,
-        avg_cost_per_task: null,
-        task_count: taskCount,
-        historical_phases_used: 0,
-        confidence: 'none',
-      });
-      return;
-    }
-
-    // Compute average cost per task across historical phases
-    const totalCostPerTask = historicalCosts.reduce(
-      (sum, h) => sum + h.total_usd / h.task_count, 0
-    );
-    const avgCostPerTask = totalCostPerTask / historicalCount;
-    const estimatedCost = Math.round(avgCostPerTask * taskCount * 100) / 100;
-
-    output({
-      phase_id: phaseId,
-      estimated_cost_usd: estimatedCost,
-      avg_cost_per_task: Math.round(avgCostPerTask * 100) / 100,
-      task_count: taskCount,
-      historical_phases_used: historicalCount,
-      confidence,
-    });
+    const result = computeCostEstimate(phaseId);
+    output({ phase_id: phaseId, ...result });
   },
 };
