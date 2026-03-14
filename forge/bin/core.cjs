@@ -6,7 +6,7 @@
  *
  * Exports: parseSimpleYaml, toSimpleYaml, parseFrontmatter, writeFrontmatter,
  *          isDoltConnectionError, restartDolt, bd, bdArgs, bdJson, git, gh,
- *          output, resolveAgentModel, loadModelProfile, loadModelOverrides,
+ *          output, forgeError, resolveAgentModel, loadModelProfile, loadModelOverrides,
  *          findGitRoot, resolveSettings, resolveSettingsPath, deepMerge,
  *          and all constants.
  */
@@ -250,6 +250,26 @@ function output(data) {
   process.stdout.write(JSON.stringify(data, null, 2) + '\n');
 }
 
+/**
+ * Emit a structured JSON error to stdout and exit with code 1.
+ *
+ * All forge-tools errors pass through this helper so that consuming workflows
+ * receive a machine-readable object they can parse and act on.
+ *
+ * @param {string} code        UPPER_SNAKE_CASE error code (e.g. MISSING_ARG, NOT_FOUND)
+ * @param {string} message     Human-readable description of what went wrong
+ * @param {string} suggestion  Concrete next step the user can take to fix the issue
+ * @param {object} [context]   Optional bag of extra data relevant to the error
+ */
+function forgeError(code, message, suggestion, context) {
+  const payload = { error: true, code, message, suggestion };
+  if (context !== undefined && context !== null) {
+    payload.context = context;
+  }
+  process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+  process.exit(1);
+}
+
 // --- Settings Resolution ---
 
 // Module-level cache for findGitRoot results, keyed by normalized `from` path
@@ -482,6 +502,7 @@ module.exports = {
   git,
   gh,
   output,
+  forgeError,
   // Settings resolution
   findGitRoot,
   resolveSettings,
