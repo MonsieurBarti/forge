@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const {
-  bd, bdArgs, bdJson, output,
+  bd, bdArgs, bdJson, output, forgeError, normalizeChildren,
 } = require('./core.cjs');
 
 module.exports = {
@@ -23,14 +23,13 @@ module.exports = {
   'phase-context'(args) {
     const phaseId = args[0];
     if (!phaseId) {
-      console.error('Usage: forge-tools phase-context <phase-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-bead-id', 'Run: forge-tools phase-context <phase-bead-id>');
     }
 
     const phaseRaw = bdJson(`show ${phaseId}`);
     const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const ready = tasks.filter(t => t.status === 'open');
     const inProgress = tasks.filter(t => t.status === 'in_progress');
@@ -61,12 +60,11 @@ module.exports = {
   'phase-ready'(args) {
     const phaseId = args[0];
     if (!phaseId) {
-      console.error('Usage: forge-tools phase-ready <phase-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-bead-id', 'Run: forge-tools phase-ready <phase-bead-id>');
     }
 
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const ready = tasks.filter(t => t.status === 'open');
     output({ phase_id: phaseId, ready_tasks: ready });
@@ -78,13 +76,12 @@ module.exports = {
   'plan-check'(args) {
     const phaseId = args[0];
     if (!phaseId) {
-      console.error('Usage: forge-tools plan-check <phase-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-bead-id', 'Run: forge-tools plan-check <phase-bead-id>');
     }
 
     const phase = bdJson(`show ${phaseId}`);
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const findings = [];
     const tasksWithoutCriteria = [];
@@ -124,9 +121,7 @@ module.exports = {
     let uncoveredReqs = [];
     if (parentId) {
       const projectChildren = bdJson(`children ${parentId}`);
-      const allIssues = Array.isArray(projectChildren)
-        ? projectChildren
-        : (projectChildren?.issues || projectChildren?.children || []);
+      const allIssues = normalizeChildren(projectChildren);
       const requirements = allIssues.filter(i =>
         (i.labels || []).includes('forge:req')
       );
@@ -185,13 +180,12 @@ module.exports = {
   'preflight-check'(args) {
     const phaseId = args[0];
     if (!phaseId) {
-      console.error('Usage: forge-tools preflight-check <phase-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-bead-id', 'Run: forge-tools preflight-check <phase-bead-id>');
     }
 
     const phase = bdJson(`show ${phaseId}`);
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const issues = [];
 
@@ -257,13 +251,12 @@ module.exports = {
   'detect-waves'(args) {
     const phaseId = args[0];
     if (!phaseId) {
-      console.error('Usage: forge-tools detect-waves <phase-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-bead-id', 'Run: forge-tools detect-waves <phase-bead-id>');
     }
 
     const phase = bdJson(`show ${phaseId}`);
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     if (tasks.length === 0) {
       output({ phase_id: phaseId, waves: [], summary: { total_tasks: 0, total_waves: 0 } });
@@ -272,6 +265,8 @@ module.exports = {
 
     const phaseTaskIds = new Set(tasks.map(t => t.id));
 
+    // NOTE: N+1 subprocess pattern -- calls bd dep list per task.
+    // Requires bd CLI bulk query support to optimize further.
     const taskDeps = {};
     for (const task of tasks) {
       const depsRaw = bd(`dep list ${task.id} --type blocks --json`, { allowFail: true });
@@ -290,44 +285,63 @@ module.exports = {
       taskDeps[task.id] = intraPhaseDeps;
     }
 
-    const waves = [];
-    const assigned = new Set();
-
-    while (assigned.size < tasks.length) {
-      const wave = [];
-      for (const task of tasks) {
-        if (assigned.has(task.id)) continue;
-        const unmetDeps = (taskDeps[task.id] || []).filter(d => !assigned.has(d));
-        if (unmetDeps.length === 0) {
-          wave.push(task);
+    // Kahn's algorithm: O(V+E) topological sort into dependency waves
+    const inDegree = {};
+    const dependents = {}; // taskId -> list of tasks that depend on it
+    const taskById = {};
+    for (const task of tasks) {
+      inDegree[task.id] = (taskDeps[task.id] || []).length;
+      dependents[task.id] = [];
+      taskById[task.id] = task;
+    }
+    for (const task of tasks) {
+      for (const depId of (taskDeps[task.id] || [])) {
+        if (dependents[depId]) {
+          dependents[depId].push(task.id);
         }
       }
+    }
 
-      if (wave.length === 0) {
-        const remaining = tasks.filter(t => !assigned.has(t.id));
-        waves.push({
-          wave_number: waves.length + 1,
-          tasks: remaining.map(t => ({
-            id: t.id,
-            title: t.title,
-            status: t.status,
-            blocked_by: taskDeps[t.id] || [],
-          })),
-          note: 'circular_or_external_dependency',
-        });
-        break;
-      }
+    const waves = [];
+    const assigned = new Set();
+    // Seed: all tasks with zero in-degree
+    let currentWave = tasks.filter(t => inDegree[t.id] === 0);
 
+    while (currentWave.length > 0) {
       waves.push({
         wave_number: waves.length + 1,
-        tasks: wave.map(t => ({
+        tasks: currentWave.map(t => ({
           id: t.id,
           title: t.title,
           status: t.status,
         })),
       });
+      const nextWave = [];
+      for (const t of currentWave) {
+        assigned.add(t.id);
+        for (const depId of (dependents[t.id] || [])) {
+          inDegree[depId]--;
+          if (inDegree[depId] === 0) {
+            nextWave.push(taskById[depId]);
+          }
+        }
+      }
+      currentWave = nextWave;
+    }
 
-      for (const t of wave) assigned.add(t.id);
+    // Handle circular or external dependencies (remaining unassigned tasks)
+    if (assigned.size < tasks.length) {
+      const remaining = tasks.filter(t => !assigned.has(t.id));
+      waves.push({
+        wave_number: waves.length + 1,
+        tasks: remaining.map(t => ({
+          id: t.id,
+          title: t.title,
+          status: t.status,
+          blocked_by: taskDeps[t.id] || [],
+        })),
+        note: 'circular_or_external_dependency',
+      });
     }
 
     const executableWaves = waves.map(w => ({
@@ -358,16 +372,14 @@ module.exports = {
     const phaseId = args[0];
     const checkpointArg = args.slice(1).join(' ');
     if (!phaseId || !checkpointArg) {
-      console.error('Usage: forge-tools checkpoint-save <phase-id> <checkpoint-json>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: phase-id and checkpoint-json', 'Run: forge-tools checkpoint-save <phase-id> <checkpoint-json>');
     }
 
     let checkpoint;
     try {
       checkpoint = JSON.parse(checkpointArg);
     } catch (err) {
-      console.error(`Invalid checkpoint JSON: ${err.message}`);
-      process.exit(1);
+      forgeError('INVALID_INPUT', `Invalid checkpoint JSON: ${err.message}`, 'Provide valid JSON as the second argument');
     }
 
     if (!checkpoint.timestamp) {
@@ -394,8 +406,7 @@ module.exports = {
   'checkpoint-load'(args) {
     const phaseId = args[0];
     if (!phaseId) {
-      console.error('Usage: forge-tools checkpoint-load <phase-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools checkpoint-load <phase-id>');
     }
 
     let checkpoint = null;
@@ -437,15 +448,16 @@ module.exports = {
   'verify-phase'(args) {
     const phaseId = args[0];
     if (!phaseId) {
-      console.error('Usage: forge-tools verify-phase <phase-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-bead-id', 'Run: forge-tools verify-phase <phase-bead-id>');
     }
 
     const phaseRaw = bdJson(`show ${phaseId}`);
     const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
+    // NOTE: N+1 subprocess pattern -- calls bd show per task.
+    // Requires bd CLI bulk query support to optimize further.
     const enrichedTasks = tasks.map(task => {
       const raw = bdJson(`show ${task.id}`);
       const full = Array.isArray(raw) ? raw[0] : raw;
@@ -465,9 +477,7 @@ module.exports = {
     let requirements = [];
     if (parentId) {
       const projectChildren = bdJson(`children ${parentId}`);
-      const allIssues = Array.isArray(projectChildren)
-        ? projectChildren
-        : (projectChildren?.issues || projectChildren?.children || []);
+      const allIssues = normalizeChildren(projectChildren);
       requirements = allIssues.filter(i =>
         (i.labels || []).includes('forge:req')
       );
@@ -492,22 +502,19 @@ module.exports = {
     const milestoneId = args[1];
     const description = args.slice(2).join(' ');
     if (!projectId || !milestoneId || !description) {
-      console.error('Usage: forge-tools add-phase <project-id> <milestone-id> <description>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: project-id, milestone-id, and description', 'Run: forge-tools add-phase <project-id> <milestone-id> <description>');
     }
 
     const milestone = bdJson(`show ${milestoneId}`);
     if (!milestone || !milestone.id) {
-      console.error(`ERROR: Milestone '${milestoneId}' not found.`);
-      process.exit(1);
+      forgeError('NOT_FOUND', `Milestone '${milestoneId}' not found`, 'Verify the milestone ID with: forge-tools milestone-list <project-id>', { milestoneId });
     }
     if (milestone.status === 'closed') {
-      console.error(`ERROR: Milestone '${milestoneId}' is closed. Phases can only be added to active milestones.`);
-      process.exit(1);
+      forgeError('INVALID_STATE', `Milestone '${milestoneId}' is closed`, 'Phases can only be added to active milestones. Create a new milestone or reopen the existing one.', { milestoneId, status: milestone.status });
     }
 
     const children = bdJson(`children ${milestoneId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
     let maxPhaseNum = 0;
@@ -525,8 +532,7 @@ module.exports = {
     let created;
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
-      console.error('Failed to create phase bead');
-      process.exit(1);
+      forgeError('COMMAND_FAILED', 'Failed to create phase bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
     bd(`dep add ${created.id} ${milestoneId} --type=parent-child`);
@@ -570,18 +576,16 @@ module.exports = {
     const afterPhaseArg = args[1];
     const description = args.slice(2).join(' ');
     if (!projectId || !afterPhaseArg || !description) {
-      console.error('Usage: forge-tools insert-phase <project-id> <after-phase-number> <description>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: project-id, after-phase-number, and description', 'Run: forge-tools insert-phase <project-id> <after-phase-number> <description>');
     }
 
     const afterPhaseNum = parseInt(afterPhaseArg, 10);
     if (isNaN(afterPhaseNum)) {
-      console.error(`Invalid phase number: ${afterPhaseArg}`);
-      process.exit(1);
+      forgeError('INVALID_INPUT', `Invalid phase number: ${afterPhaseArg}`, 'Provide a numeric phase number. List phases with: forge-tools list-phases <project-id>');
     }
 
     const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
     let targetPhase = null;
@@ -594,8 +598,7 @@ module.exports = {
     }
 
     if (!targetPhase) {
-      console.error(`Phase ${afterPhaseNum} not found in project`);
-      process.exit(1);
+      forgeError('NOT_FOUND', `Phase ${afterPhaseNum} not found in project`, 'List available phases with: forge-tools list-phases <project-id>', { projectId, phaseNumber: afterPhaseNum });
     }
 
     let maxDecimal = 0;
@@ -617,8 +620,7 @@ module.exports = {
     let created;
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
-      console.error('Failed to create phase bead');
-      process.exit(1);
+      forgeError('COMMAND_FAILED', 'Failed to create phase bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
     bd(`dep add ${created.id} ${projectId} --type=parent-child`);
@@ -660,18 +662,16 @@ module.exports = {
     const phaseNumArg = args[1];
     const force = args.includes('--force');
     if (!projectId || !phaseNumArg) {
-      console.error('Usage: forge-tools remove-phase <project-id> <phase-number> [--force]');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: project-id and phase-number', 'Run: forge-tools remove-phase <project-id> <phase-number> [--force]');
     }
 
     const phaseNum = parseFloat(phaseNumArg);
     if (isNaN(phaseNum)) {
-      console.error(`Invalid phase number: ${phaseNumArg}`);
-      process.exit(1);
+      forgeError('INVALID_INPUT', `Invalid phase number: ${phaseNumArg}`, 'Provide a numeric phase number. List phases with: forge-tools list-phases <project-id>');
     }
 
     const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
     let targetPhase = null;
@@ -684,20 +684,17 @@ module.exports = {
     }
 
     if (!targetPhase) {
-      console.error(`Phase ${phaseNum} not found in project`);
-      process.exit(1);
+      forgeError('NOT_FOUND', `Phase ${phaseNum} not found in project`, 'List available phases with: forge-tools list-phases <project-id>', { projectId, phaseNumber: phaseNum });
     }
 
     if ((targetPhase.status === 'in_progress' || targetPhase.status === 'closed') && !force) {
-      console.error(`Phase ${phaseNum} is ${targetPhase.status}. Use --force to remove anyway.`);
-      process.exit(1);
+      forgeError('INVALID_STATE', `Phase ${phaseNum} is ${targetPhase.status}`, 'Use --force flag to remove anyway: forge-tools remove-phase <project-id> <phase-number> --force', { phaseNumber: phaseNum, status: targetPhase.status });
     }
 
     const phaseChildren = bdJson(`children ${targetPhase.id}`);
-    const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+    const tasks = normalizeChildren(phaseChildren);
     if (tasks.length > 0 && !force) {
-      console.error(`Phase ${phaseNum} has ${tasks.length} tasks. Use --force to remove anyway.`);
-      process.exit(1);
+      forgeError('INVALID_STATE', `Phase ${phaseNum} has ${tasks.length} tasks`, 'Use --force flag to remove anyway: forge-tools remove-phase <project-id> <phase-number> --force', { phaseNumber: phaseNum, taskCount: tasks.length });
     }
 
     const targetDepsRaw = bd(`dep list ${targetPhase.id} --json`, { allowFail: true });
@@ -768,7 +765,7 @@ module.exports = {
           ? `${item.num - 1}.${item.decimal}`
           : `${item.num - 1}`;
         const newTitle = `Phase ${newNum}: ${item.rest}`;
-        bd(`update ${item.phase.id} --title="${newTitle}"`);
+        bdArgs(['update', item.phase.id, `--title=${newTitle}`]);
         renumbered.push({ id: item.phase.id, old_title: item.phase.title, new_title: newTitle });
       }
     }
@@ -792,12 +789,11 @@ module.exports = {
   'list-phases'(args) {
     const projectId = args[0];
     if (!projectId) {
-      console.error('Usage: forge-tools list-phases <project-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: project-id', 'Run: forge-tools list-phases <project-id>');
     }
 
     const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
     const parsed = phases.map(p => {
@@ -824,14 +820,12 @@ module.exports = {
     const projectId = args[0];
     const phaseNumber = args[1];
     if (!projectId || !phaseNumber) {
-      console.error('Usage: forge-tools resolve-phase <project-id> <phase-number>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: project-id and phase-number', 'Run: forge-tools resolve-phase <project-id> <phase-number>');
     }
 
     const num = parseInt(phaseNumber, 10);
     if (isNaN(num)) {
-      console.error(`Invalid phase number: ${phaseNumber}`);
-      process.exit(1);
+      forgeError('INVALID_INPUT', `Invalid phase number: ${phaseNumber}`, 'Provide a numeric phase number. List phases with: forge-tools list-phases <project-id>');
     }
 
     const children = bdJson(`children ${projectId}`);
@@ -840,7 +834,7 @@ module.exports = {
       return;
     }
 
-    const issues = Array.isArray(children) ? children : (children.issues || children.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i =>
       (i.labels || []).includes('forge:phase') && i.id !== projectId
     );
@@ -865,21 +859,18 @@ module.exports = {
     const phaseId = args[0];
     const jsonStr = args.slice(1).join(' ');
     if (!phaseId || !jsonStr) {
-      console.error('Usage: forge-tools context-write <phase-id> <json-string>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: phase-id and json-string', 'Run: forge-tools context-write <phase-id> <json-string>');
     }
 
     let ctx;
     try {
       ctx = JSON.parse(jsonStr);
     } catch {
-      console.error('Invalid JSON input');
-      process.exit(1);
+      forgeError('INVALID_INPUT', 'Invalid JSON input', 'Provide valid JSON with at least "agent" and "status" fields');
     }
 
     if (!ctx.agent || !ctx.status) {
-      console.error('Required fields: agent, status');
-      process.exit(1);
+      forgeError('INVALID_INPUT', 'Missing required fields: agent and status', 'JSON must include "agent" and "status" fields, e.g. {"agent":"forge-executor","status":"completed"}');
     }
 
     const schema = {
@@ -911,8 +902,7 @@ module.exports = {
   'context-read'(args) {
     const phaseId = args[0];
     if (!phaseId) {
-      console.error('Usage: forge-tools context-read <phase-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools context-read <phase-id>');
     }
 
     const comments = bdJson(`comments ${phaseId}`);
@@ -946,13 +936,12 @@ module.exports = {
   'retro-query'(args) {
     const projectId = args[0];
     if (!projectId) {
-      console.error('Usage: forge-tools retro-query <project-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: project-id', 'Run: forge-tools retro-query <project-id>');
     }
 
     // Two-level traversal: project -> milestones -> phases (milestone hierarchy from Phase 9.1)
     const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
     const allIssues = [];
     const seenIds = new Set();
@@ -965,7 +954,7 @@ module.exports = {
     };
     for (const ms of milestones) {
       const msChildren = bdJson(`children ${ms.id}`);
-      const msIssues = Array.isArray(msChildren) ? msChildren : (msChildren?.issues || msChildren?.children || []);
+      const msIssues = normalizeChildren(msChildren);
       addIssues(msIssues);
     }
     addIssues(issues); // Also collect legacy direct children

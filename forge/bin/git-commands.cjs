@@ -10,7 +10,31 @@
 
 const fs = require('fs');
 const path = require('path');
-const { bdJson, git, gh, output } = require('./core.cjs');
+const { bdJson, git, gh, output, forgeError, normalizeChildren } = require('./core.cjs');
+
+/**
+ * Validate a bead/milestone ID to prevent path traversal.
+ * IDs must be lowercase alphanumeric with hyphens, e.g. "abc-1234".
+ */
+function validateId(id) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
+    forgeError('INVALID_INPUT', `Invalid ID format: ${id}`, 'IDs must contain only lowercase letters, digits, and hyphens');
+  }
+}
+
+/**
+ * Resolve a worktree path and verify it stays within the expected base directory.
+ */
+function safeWorktreePath(milestoneId) {
+  validateId(milestoneId);
+  const baseDir = path.join(process.cwd(), '.forge', 'worktrees');
+  const wtPath = path.join(baseDir, milestoneId);
+  const resolved = path.resolve(wtPath);
+  if (!resolved.startsWith(path.resolve(baseDir) + path.sep) && resolved !== path.resolve(baseDir)) {
+    forgeError('INVALID_INPUT', 'Path traversal detected', 'IDs must not contain path separators or traversal sequences');
+  }
+  return wtPath;
+}
 
 module.exports = {
   /**
@@ -19,10 +43,9 @@ module.exports = {
   'worktree-create'(args) {
     const milestoneId = args[0];
     if (!milestoneId) {
-      console.error('Usage: forge-tools worktree-create <milestone-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools worktree-create <milestone-id>');
     }
-    const wtPath = path.join(process.cwd(), '.forge', 'worktrees', milestoneId);
+    const wtPath = safeWorktreePath(milestoneId);
     const branch = `forge/m-${milestoneId}`;
 
     if (fs.existsSync(wtPath)) {
@@ -47,10 +70,9 @@ module.exports = {
   'worktree-path'(args) {
     const milestoneId = args[0];
     if (!milestoneId) {
-      console.error('Usage: forge-tools worktree-path <milestone-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools worktree-path <milestone-id>');
     }
-    const wtPath = path.join(process.cwd(), '.forge', 'worktrees', milestoneId);
+    const wtPath = safeWorktreePath(milestoneId);
     const exists = fs.existsSync(wtPath);
     output({ path: wtPath, exists });
   },
@@ -61,10 +83,9 @@ module.exports = {
   'worktree-remove'(args) {
     const milestoneId = args[0];
     if (!milestoneId) {
-      console.error('Usage: forge-tools worktree-remove <milestone-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools worktree-remove <milestone-id>');
     }
-    const wtPath = path.join(process.cwd(), '.forge', 'worktrees', milestoneId);
+    const wtPath = safeWorktreePath(milestoneId);
 
     if (!fs.existsSync(wtPath)) {
       output({ removed: false, reason: 'not_found' });
@@ -89,8 +110,7 @@ module.exports = {
   'branch-create'(args) {
     const phaseId = args[0];
     if (!phaseId) {
-      console.error('Usage: forge-tools branch-create <phase-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools branch-create <phase-id>');
     }
 
     const deps = bdJson(`dep list ${phaseId}`);
@@ -129,8 +149,7 @@ module.exports = {
   'branch-push'(args) {
     const branch = args[0];
     if (!branch) {
-      console.error('Usage: forge-tools branch-push <branch>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: branch', 'Run: forge-tools branch-push <branch-name>');
     }
     git(['push', '-u', 'origin', branch]);
     output({ pushed: true, branch });
@@ -145,15 +164,16 @@ module.exports = {
     const base = baseFlag ? baseFlag.split('=')[1] : 'main';
 
     if (!phaseId) {
-      console.error('Usage: forge-tools pr-create <phase-id> [--base=<branch>]');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools pr-create <phase-id> [--base=<branch>]');
     }
 
     const phaseRaw = bdJson(`show ${phaseId}`);
     const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
+    // NOTE: N+1 subprocess pattern -- calls bd dep list per task.
+    // Requires bd CLI bulk query support to optimize further.
     const reqCoverage = [];
     for (const task of tasks) {
       const taskDeps = bdJson(`dep list ${task.id}`);
@@ -220,8 +240,7 @@ module.exports = {
       ]);
       output({ created: true, url: prUrl, branch, base, title });
     } catch (err) {
-      output({ created: false, error: err.message, branch, base });
-      process.exit(1);
+      forgeError('COMMAND_FAILED', `Failed to create PR: ${err.message}`, 'Verify the branch has been pushed and try again with: forge-tools pr-create <phase-id>', { branch, base });
     }
   },
 
@@ -231,8 +250,7 @@ module.exports = {
   'quick-branch-create'(args) {
     const quickId = args[0];
     if (!quickId) {
-      console.error('Usage: forge-tools quick-branch-create <quick-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: quick-id', 'Run: forge-tools quick-branch-create <quick-id>');
     }
 
     const branch = `forge/quick-${quickId}`;
@@ -258,14 +276,13 @@ module.exports = {
     const base = baseFlag ? baseFlag.split('=')[1] : 'main';
 
     if (!quickId) {
-      console.error('Usage: forge-tools quick-pr-create <quick-id> [--base=<branch>]');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: quick-id', 'Run: forge-tools quick-pr-create <quick-id> [--base=<branch>]');
     }
 
     const quickRaw = bdJson(`show ${quickId}`);
     const quick = Array.isArray(quickRaw) ? quickRaw[0] : quickRaw;
     const children = bdJson(`children ${quickId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const taskLines = tasks.map(t => {
       const status = t.status === 'closed' ? 'x' : ' ';
@@ -295,7 +312,7 @@ module.exports = {
       ]);
       output({ created: true, url: prUrl, branch, base, title });
     } catch (err) {
-      output({ created: false, error: err.message, branch, base });
+      forgeError('COMMAND_FAILED', `Failed to create PR: ${err.message}`, 'Verify the branch has been pushed and try again with: forge-tools quick-pr-create <quick-id>', { branch, base });
     }
   },
 };

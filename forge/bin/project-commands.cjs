@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { homedir } = require('os');
 const {
-  bd, bdArgs, bdJson, output,
+  bd, bdArgs, bdJson, output, forgeError, normalizeChildren,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS,
   MODEL_PROFILES, ROLE_TO_AGENT,
@@ -23,18 +23,6 @@ const {
   resolveAgentModel, loadModelProfile, loadModelOverrides,
   findGitRoot,
 } = require('./core.cjs');
-
-// ---------------------------------------------------------------------------
-// Shared helpers (extracted to reduce duplication)
-// ---------------------------------------------------------------------------
-
-/**
- * Normalize the result of bdJson('children ...') into a flat array.
- * bd may return an array directly, or an object with .issues / .children.
- */
-function normalizeChildren(raw) {
-  return Array.isArray(raw) ? raw : (raw?.issues || raw?.children || []);
-}
 
 /**
  * Parse a bd create result to extract the bead ID.
@@ -311,7 +299,7 @@ function collectProjectIssues(projectId) {
 
   const classifyIssue = (item) => {
     if ((item.labels || []).includes('forge:phase')) return 'phase';
-    if ((item.labels || []).includes('forge:req') || item.issue_type === 'feature') return 'req';
+    if ((item.labels || []).includes('forge:req')) return 'req';
     return null;
   };
 
@@ -640,8 +628,6 @@ function generateDashboardHTML(data) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(projectTitle)} - Dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #09090b;
@@ -664,7 +650,7 @@ function generateDashboardHTML(data) {
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
-    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
     line-height: 1.6;
@@ -672,7 +658,7 @@ function generateDashboardHTML(data) {
   }
 
   code, .mono {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.8em;
     color: var(--text-muted);
   }
@@ -1074,7 +1060,7 @@ function generateDashboardHTML(data) {
   }
   .task-details pre {
     white-space: pre-wrap;
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.72rem;
     margin-top: 0.25rem;
   }
@@ -1400,8 +1386,7 @@ module.exports = {
   remember(args) {
     const memory = args.join(' ');
     if (!memory) {
-      console.error('Usage: forge-tools remember <text>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: text', 'Run: forge-tools remember <text-to-remember>');
     }
     bdArgs(['remember', ...args]);
     output({ ok: true, memory });
@@ -1413,8 +1398,7 @@ module.exports = {
   'project-context'(args) {
     const projectId = args[0];
     if (!projectId) {
-      console.error('Usage: forge-tools project-context <project-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools project-context <project-bead-id>');
     }
 
     const project = bdJson(`show ${projectId}`);
@@ -1439,8 +1423,7 @@ module.exports = {
   progress(args) {
     const projectId = args[0];
     if (!projectId) {
-      console.error('Usage: forge-tools progress <project-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools progress <project-bead-id>');
     }
 
     const project = bdJson(`show ${projectId}`);
@@ -1471,8 +1454,7 @@ module.exports = {
   'full-progress'(args) {
     const projectId = args[0];
     if (!projectId) {
-      console.error('Usage: forge-tools full-progress <project-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools full-progress <project-bead-id>');
     }
 
     const project = bdJson(`show ${projectId}`);
@@ -1513,8 +1495,7 @@ module.exports = {
   'generate-dashboard'(args) {
     const projectId = args[0];
     if (!projectId) {
-      console.error('Usage: forge-tools generate-dashboard <project-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools generate-dashboard <project-bead-id>');
     }
 
     const project = bdJson(`show ${projectId}`);
@@ -1576,8 +1557,7 @@ module.exports = {
     const resolvedDiagDir = path.resolve(diagDir);
     const resolvedFilePath = path.resolve(filePath);
     if (!resolvedFilePath.startsWith(resolvedDiagDir + path.sep) && resolvedFilePath !== resolvedDiagDir) {
-      console.error('Invalid dashboard file path');
-      process.exit(1);
+      forgeError('INVALID_INPUT', 'Invalid dashboard file path', 'Ensure the project ID does not contain path traversal characters', { projectId });
     }
     fs.writeFileSync(resolvedFilePath, html, 'utf8');
 
@@ -1590,8 +1570,7 @@ module.exports = {
   'save-session'(args) {
     const projectId = args[0];
     if (!projectId) {
-      console.error('Usage: forge-tools save-session <project-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools save-session <project-bead-id>');
     }
 
     const { phases } = collectProjectIssues(projectId);
@@ -1679,8 +1658,7 @@ module.exports = {
   health(args) {
     const projectId = args[0];
     if (!projectId) {
-      console.error('Usage: forge-tools health <project-bead-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools health <project-bead-id>');
     }
 
     const project = bdJson(`show ${projectId}`);
@@ -1689,16 +1667,9 @@ module.exports = {
       return;
     }
 
-    const issues = normalizeChildren(bdJson(`children ${projectId}`));
+    const { phases, requirements } = collectProjectIssues(projectId);
 
-    const phases = issues.filter(i =>
-      (i.labels || []).includes('forge:phase') || i.issue_type === 'epic'
-    ).filter(i => i.id !== projectId);
-    const requirements = issues.filter(i =>
-      (i.labels || []).includes('forge:req') || i.issue_type === 'feature'
-    );
-
-    const diagnostics = { structure: [], dependencies: [], state: [], config: [], installation: [] };
+    const diagnostics = { structure: [], dependencies: [], state: [], config: [], installation: [], orphans: [] };
 
     const hasProjectLabel = (project.labels || []).includes('forge:project');
     diagnostics.structure.push({
@@ -1948,12 +1919,56 @@ module.exports = {
       severity: versionOk ? 'ok' : 'warning',
     });
 
+    // Orphan detection: find forge-labeled beads with no parent-child dependency.
+    // Use phaseChildrenMap to skip beads already known to have parents (avoids N+1 bd calls).
+    const beadsWithKnownParent = new Set();
+    for (const [, phaseTasks] of phaseChildrenMap) {
+      for (const t of phaseTasks) {
+        beadsWithKnownParent.add(t.id);
+      }
+    }
+    // Phases that are children of milestones are also known to have parents
+    // (they were fetched via bdJson(`children ${ms.id}`) in the milestone traversal above).
+
+    const orphans = [];
+    const forgeBeads = [
+      ...phases.map(p => ({ ...p, forge_label: 'forge:phase' })),
+      ...allTasks.filter(t => (t.labels || []).includes('forge:task')).map(t => ({ ...t, forge_label: 'forge:task' })),
+    ];
+    for (const bead of forgeBeads) {
+      // Skip beads already known to have a parent from phaseChildrenMap
+      if (beadsWithKnownParent.has(bead.id)) continue;
+      const depOutput = bd(`dep list ${bead.id} --direction=up --type=parent-child`, { allowFail: true });
+      const hasParent = depOutput && depOutput.trim() !== '' && !depOutput.includes('No dependencies');
+      if (!hasParent) {
+        // Suggest the project itself as parent for phases, or the phase for tasks
+        const suggestedParent = bead.forge_label === 'forge:phase' ? projectId : (bead.phase_id || projectId);
+        orphans.push({
+          id: bead.id,
+          title: bead.title,
+          label: bead.forge_label,
+          suggested_fix: `bd dep add ${bead.id} ${suggestedParent} --type=parent-child`,
+        });
+      }
+    }
+
+    diagnostics.orphans.push({
+      check: 'orphan_beads',
+      ok: orphans.length === 0,
+      message: orphans.length === 0
+        ? 'No orphan beads found'
+        : `${orphans.length} orphan bead(s) found without parent-child dependency`,
+      severity: orphans.length > 0 ? 'warning' : 'ok',
+      details: orphans,
+    });
+
     const allChecks = [
       ...diagnostics.structure,
       ...diagnostics.dependencies,
       ...diagnostics.state,
       ...diagnostics.config,
       ...diagnostics.installation,
+      ...diagnostics.orphans,
     ];
     const errors = allChecks.filter(c => !c.ok && (c.severity === 'error' || c.fixable));
     const warnings = allChecks.filter(c => !c.ok && c.severity === 'warning');
@@ -2002,17 +2017,14 @@ module.exports = {
     const value = args[2];
 
     if (!scope || !key || value === undefined) {
-      console.error('Usage: forge-tools settings-set <global|project> <key> <value>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: scope, key, and value', 'Run: forge-tools settings-set <global|project> <key> <value>');
     }
 
     const { topKey, subKey, isNested } = parseDotKey(key);
 
     const EXTRA_TOP_KEYS = ['model_profile', 'model_overrides'];
     if (!isNested && !(topKey in SETTINGS_DEFAULTS) && !EXTRA_TOP_KEYS.includes(topKey)) {
-      console.error(`Unknown setting: ${key}`);
-      console.error(`Available: ${Object.keys(SETTINGS_DEFAULTS).join(', ')}, model_profile, model_overrides.<agent>, models.<role>`);
-      process.exit(1);
+      forgeError('INVALID_INPUT', `Unknown setting: ${key}`, `Available settings: ${Object.keys(SETTINGS_DEFAULTS).join(', ')}, model_profile, model_overrides.<agent>, models.<role>`, { key });
     }
 
     const parsedValue = coerceBool(value);
@@ -2050,8 +2062,7 @@ module.exports = {
       fs.writeFileSync(projectPath, toSimpleYaml(existing));
       output({ ok: true, scope, key, value: parsedValue });
     } else {
-      console.error('Scope must be "global" or "project"');
-      process.exit(1);
+      forgeError('INVALID_INPUT', `Invalid scope: ${scope}`, 'Scope must be "global" or "project"', { scope });
     }
   },
 
@@ -2063,8 +2074,7 @@ module.exports = {
     const key = args[1];
 
     if (!scope || !key) {
-      console.error('Usage: forge-tools settings-clear <global|project> <key>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: scope and key', 'Run: forge-tools settings-clear <global|project> <key>');
     }
 
     const { topKey, subKey } = parseDotKey(key);
@@ -2107,16 +2117,14 @@ module.exports = {
     const jsonStr = args.slice(1).join(' ');
 
     if (!scope || !jsonStr) {
-      console.error('Usage: forge-tools settings-bulk <global|project> <json>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: scope and json', 'Run: forge-tools settings-bulk <global|project> <json>');
     }
 
     let updates;
     try {
       updates = JSON.parse(jsonStr);
     } catch {
-      console.error('Invalid JSON');
-      process.exit(1);
+      forgeError('INVALID_INPUT', 'Invalid JSON input', 'Provide valid JSON object, e.g. {"auto_commit":true,"skip_verification":false}');
     }
 
     const results = [];
@@ -2164,8 +2172,7 @@ module.exports = {
     const rawFlag = args.includes('--raw');
     const agent = args.filter(a => a !== '--raw')[0];
     if (!agent) {
-      console.error('Usage: forge-tools resolve-model <agent-name> [--raw]');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: agent-name', 'Run: forge-tools resolve-model <agent-name> [--raw]');
     }
 
     const result = resolveAgentModel(agent);
@@ -2183,8 +2190,7 @@ module.exports = {
   'model-for-role'(args) {
     const role = args[0];
     if (!role) {
-      console.error('Usage: forge-tools model-for-role <role>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: role', 'Run: forge-tools model-for-role <role>');
     }
 
     const result = resolveAgentModel(role);
@@ -2220,8 +2226,7 @@ module.exports = {
   'config-get'(args) {
     const key = args[0];
     if (!key) {
-      console.error('Usage: forge-tools config-get <key>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: key', 'Run: forge-tools config-get <key>. List keys with: forge-tools config-list');
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
     const value = bdArgs(['kv', 'get', fullKey], { allowFail: true });
@@ -2235,8 +2240,7 @@ module.exports = {
     const key = args[0];
     const value = args.slice(1).join(' ');
     if (!key || !value) {
-      console.error('Usage: forge-tools config-set <key> <value>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: key and value', 'Run: forge-tools config-set <key> <value>. List keys with: forge-tools config-list');
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
     bdArgs(['kv', 'set', fullKey, value]);
@@ -2277,8 +2281,7 @@ module.exports = {
   'config-clear'(args) {
     const key = args[0];
     if (!key) {
-      console.error('Usage: forge-tools config-clear <key>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: key', 'Run: forge-tools config-clear <key>. List keys with: forge-tools config-list');
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
     bdArgs(['kv', 'clear', fullKey], { allowFail: true });
@@ -2320,15 +2323,13 @@ module.exports = {
 
     const result = bdArgs(['create', `--title=${title}`, `--description=${description}`, '--type=task', '--json']);
     if (!result) {
-      console.error('Failed to create debug bead');
-      process.exit(1);
+      forgeError('COMMAND_FAILED', 'Failed to create debug bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
     const debugId = parseBdCreateId(result);
 
     if (!debugId) {
-      console.error('Failed to parse debug bead ID from:', result);
-      process.exit(1);
+      forgeError('COMMAND_FAILED', 'Failed to parse debug bead ID from bd output', 'Check bd connectivity and try again', { rawOutput: result });
     }
 
     bd(`label add ${debugId} forge:debug`, { allowFail: true });
@@ -2346,8 +2347,7 @@ module.exports = {
     const value = args.slice(2).join(' ');
 
     if (!id || !field) {
-      console.error('Usage: debug-update <id> <field> <value>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: id and field', 'Run: forge-tools debug-update <id> <field> <value>');
     }
 
     if (field === 'notes') {
@@ -2357,13 +2357,11 @@ module.exports = {
     } else if (field === 'status') {
       const validStatuses = ['open', 'in_progress', 'closed', 'blocked', 'deferred'];
       if (!validStatuses.includes(value)) {
-        console.error(`Invalid status: ${value}. Must be one of: ${validStatuses.join(', ')}`);
-        process.exit(1);
+        forgeError('INVALID_INPUT', `Invalid status: ${value}`, `Must be one of: ${validStatuses.join(', ')}`, { value, validStatuses });
       }
       bdArgs(['update', id, `--status=${value}`], { allowFail: true });
     } else {
-      console.error(`Unknown field: ${field}. Use: notes, design, status`);
-      process.exit(1);
+      forgeError('INVALID_INPUT', `Unknown field: ${field}`, 'Valid fields are: notes, design, status', { field });
     }
 
     output({ updated: true, id });
@@ -2406,8 +2404,7 @@ module.exports = {
     const files = args[4] || '';
 
     if (!projectId || !title) {
-      console.error('Usage: todo-create <project-id> <title> [description] [area] [files]');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: project-id and title', 'Run: forge-tools todo-create <project-id> <title> [description] [area] [files]');
     }
 
     const descParts = [description];
@@ -2417,15 +2414,13 @@ module.exports = {
 
     const result = bdArgs(['create', `--title=${title}`, `--description=${fullDesc}`, '--type=task', '--priority=3', '--json']);
     if (!result) {
-      console.error('Failed to create todo bead');
-      process.exit(1);
+      forgeError('COMMAND_FAILED', 'Failed to create todo bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
     const todoId = parseBdCreateId(result);
 
     if (!todoId) {
-      console.error('Failed to parse todo bead ID from:', result);
-      process.exit(1);
+      forgeError('COMMAND_FAILED', 'Failed to parse todo bead ID from bd output', 'Check bd connectivity and try again', { rawOutput: result });
     }
 
     bd(`label add ${todoId} forge:todo`, { allowFail: true });
@@ -2440,8 +2435,7 @@ module.exports = {
   'milestone-list'(args) {
     const projectId = args[0];
     if (!projectId) {
-      console.error('Usage: forge-tools milestone-list <project-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: project-id', 'Run: forge-tools milestone-list <project-id>');
     }
 
     const issues = normalizeChildren(bdJson(`children ${projectId}`));
@@ -2484,14 +2478,12 @@ module.exports = {
   'milestone-audit'(args) {
     const milestoneId = args[0];
     if (!milestoneId) {
-      console.error('Usage: forge-tools milestone-audit <milestone-id>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools milestone-audit <milestone-id>');
     }
 
     const milestone = bdJson(`show ${milestoneId}`);
     if (!milestone) {
-      console.error(`Milestone not found: ${milestoneId}`);
-      process.exit(1);
+      forgeError('NOT_FOUND', `Milestone not found: ${milestoneId}`, 'Verify the milestone ID with: forge-tools milestone-list <project-id>', { milestoneId });
     }
 
     const issues = normalizeChildren(bdJson(`children ${milestoneId}`));
@@ -2565,8 +2557,7 @@ module.exports = {
     const projectId = args[0];
     const name = args.slice(1).join(' ');
     if (!projectId || !name) {
-      console.error('Usage: forge-tools milestone-create <project-id> <milestone-name>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required arguments: project-id and milestone-name', 'Run: forge-tools milestone-create <project-id> <milestone-name>');
     }
 
     const title = `Milestone: ${name}`;
@@ -2574,8 +2565,7 @@ module.exports = {
     let created;
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
-      console.error('Failed to create milestone bead');
-      process.exit(1);
+      forgeError('COMMAND_FAILED', 'Failed to create milestone bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
     bd(`label add ${created.id} forge:milestone`);
@@ -2595,8 +2585,7 @@ module.exports = {
   'monorepo-create'(args) {
     const name = args.join(' ').trim();
     if (!name) {
-      console.error('Usage: forge-tools monorepo-create <monorepo-name>');
-      process.exit(1);
+      forgeError('MISSING_ARG', 'Missing required argument: monorepo-name', 'Run: forge-tools monorepo-create <monorepo-name>');
     }
 
     // 1. Detect workspace packages
@@ -2609,8 +2598,7 @@ module.exports = {
     let created;
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
-      console.error('Failed to create monorepo bead');
-      process.exit(1);
+      forgeError('COMMAND_FAILED', 'Failed to create monorepo bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
     bd(`label add ${created.id} forge:monorepo`);

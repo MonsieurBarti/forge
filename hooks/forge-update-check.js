@@ -12,9 +12,11 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
-const STATE_FILE = path.join(os.tmpdir(), 'forge-update-check.json');
+const CACHE_DIR = path.join(os.homedir(), '.cache', 'forge');
+const STATE_FILE = path.join(CACHE_DIR, 'forge-update-check.json');
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 async function main() {
@@ -63,8 +65,6 @@ async function main() {
     const candidates = [
       // Common locations relative to cwd
       path.join(process.cwd(), 'package.json'),
-      // The forge source dir if it exists
-      path.join(os.homedir(), 'gt', 'forge', 'package.json'),
     ];
 
     for (const candidate of candidates) {
@@ -83,6 +83,7 @@ async function main() {
     state.last_check = now;
     state.installed_version = installedVersion;
     state.source_version = sourceVersion;
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
     fs.writeFileSync(STATE_FILE, JSON.stringify(state));
 
     // Compare versions if both available
@@ -92,8 +93,56 @@ async function main() {
         `Run: node install.js`
       );
     }
+
+    // Drift detection -- compare installed files against manifest hashes
+    checkDrift();
   } catch {
     // Hooks must never block -- fail silently
+  }
+}
+
+/**
+ * Checks installed files against the SHA-256 manifest.
+ * Reports drift (modified files) to stderr.
+ * Silently skips if manifest does not exist.
+ */
+function checkDrift() {
+  const claudeDir = path.join(os.homedir(), '.claude');
+  const manifestPath = path.join(claudeDir, 'forge', '.forge-manifest.json');
+
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch {
+    // No manifest -- skip silently (backwards compat)
+    return;
+  }
+
+  if (!manifest.files || typeof manifest.files !== 'object') return;
+
+  let driftCount = 0;
+  const resolvedClaudeDir = path.resolve(claudeDir) + path.sep;
+  for (const [relPath, expectedHash] of Object.entries(manifest.files)) {
+    try {
+      const absPath = path.join(claudeDir, relPath);
+      // Validate path stays within claudeDir to prevent traversal
+      if (!path.resolve(absPath).startsWith(resolvedClaudeDir)) continue;
+      const content = fs.readFileSync(absPath);
+      const actualHash = crypto.createHash('sha256').update(content).digest('hex');
+      if (actualHash !== expectedHash) {
+        driftCount++;
+      }
+    } catch {
+      // File missing or unreadable -- counts as drift
+      driftCount++;
+    }
+  }
+
+  if (driftCount > 0) {
+    console.error(
+      `[forge] Install drift detected: ${driftCount} file(s) modified since install. ` +
+      `Run: node install.js`
+    );
   }
 }
 

@@ -6,7 +6,7 @@
  *
  * Exports: parseSimpleYaml, toSimpleYaml, parseFrontmatter, writeFrontmatter,
  *          isDoltConnectionError, restartDolt, bd, bdArgs, bdJson, git, gh,
- *          output, resolveAgentModel, loadModelProfile, loadModelOverrides,
+ *          output, forgeError, resolveAgentModel, loadModelProfile, loadModelOverrides,
  *          findGitRoot, resolveSettings, resolveSettingsPath, deepMerge,
  *          and all constants.
  */
@@ -98,8 +98,7 @@ function parseSimpleYaml(text) {
     let val = trimmed.slice(colonIdx + 1).trim();
 
     if (indent > 0 && currentSection) {
-      // Nested key under current section
-      if (FORBIDDEN_KEYS.has(key)) continue;
+      // Nested key under current section (FORBIDDEN_KEYS already checked above)
       if (val === 'true') val = true;
       else if (val === 'false') val = false;
       else if (/^\d+(\.\d+)?$/.test(val)) val = parseFloat(val);
@@ -163,7 +162,9 @@ function restartDolt() {
       timeout: 15000,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    // Give Dolt a moment to become ready
+    // Give Dolt a moment to become ready.
+    // NOTE: Synchronous sleep via Atomics.wait blocks the event loop for 2s.
+    // The execFileSync-based architecture prevents using async alternatives here.
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
   } catch (_) {
     // Ignore restart errors; the retry will surface the real failure
@@ -225,7 +226,28 @@ function bdJson(args) {
     }
     return parsed;
   } catch {
-    console.error('[bdJson] Parse failure for:', args, 'raw:', raw);
+    const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
+    console.error('[bdJson] Parse failure for:', args, 'raw:', truncated);
+    return null;
+  }
+}
+
+/**
+ * Like bdJson() but accepts an array of arguments (safe from injection).
+ * Appends --json to the argument list.
+ */
+function bdJsonArgs(argList) {
+  const raw = _bdExec([...argList, '--json']);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (argList[0] === 'show' && Array.isArray(parsed)) {
+      return parsed[0] !== undefined ? parsed[0] : null;
+    }
+    return parsed;
+  } catch {
+    const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
+    console.error('[bdJsonArgs] Parse failure for:', argList.join(' '), 'raw:', truncated);
     return null;
   }
 }
@@ -246,8 +268,36 @@ function gh(args, opts = {}) {
   }
 }
 
+/**
+ * Normalize the result of bdJson('children ...') into a flat array.
+ * bd may return an array directly, or an object with .issues / .children.
+ */
+function normalizeChildren(raw) {
+  return Array.isArray(raw) ? raw : (raw?.issues || raw?.children || []);
+}
+
 function output(data) {
   process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+}
+
+/**
+ * Emit a structured JSON error to stdout and exit with code 1.
+ *
+ * All forge-tools errors pass through this helper so that consuming workflows
+ * receive a machine-readable object they can parse and act on.
+ *
+ * @param {string} code        UPPER_SNAKE_CASE error code (e.g. MISSING_ARG, NOT_FOUND)
+ * @param {string} message     Human-readable description of what went wrong
+ * @param {string} suggestion  Concrete next step the user can take to fix the issue
+ * @param {object} [context]   Optional bag of extra data relevant to the error
+ */
+function forgeError(code, message, suggestion, context) {
+  const payload = { error: true, code, message, suggestion };
+  if (context !== undefined && context !== null) {
+    payload.context = context;
+  }
+  process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+  process.exit(1);
 }
 
 // --- Settings Resolution ---
@@ -479,9 +529,12 @@ module.exports = {
   bd,
   bdArgs,
   bdJson,
+  bdJsonArgs,
   git,
   gh,
   output,
+  normalizeChildren,
+  forgeError,
   // Settings resolution
   findGitRoot,
   resolveSettings,

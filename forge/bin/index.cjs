@@ -5,6 +5,7 @@
  * index.cjs -- Entry point for forge-tools. Merges all domain modules and dispatches commands.
  */
 
+const { forgeError } = require('./core.cjs');
 const phaseCommands = require('./phase-commands.cjs');
 const projectCommands = require('./project-commands.cjs');
 const gitCommands = require('./git-commands.cjs');
@@ -28,14 +29,11 @@ if (!command || command === '--help' || command === '-h') {
 }
 
 if (!commands[command]) {
-  console.error(`Unknown command: ${command}`);
-  console.error(`Available: ${Object.keys(commands).join(', ')}`);
-  process.exit(1);
+  forgeError('UNKNOWN_COMMAND', `Unknown command: ${command}`, `Available commands: ${Object.keys(commands).join(', ')}`, { command });
 }
 
 try {
   commands[command](args);
 } catch (err) {
-  console.error(`Error in ${command}: ${err.message}`);
-  process.exit(1);
+  forgeError('COMMAND_FAILED', `Error in ${command}: ${err.message}`, `Run: forge-tools ${command} --help or check arguments`, { command, error: err.message });
 }
