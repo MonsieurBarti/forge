@@ -1464,6 +1464,38 @@ function _findTestDir(dir) {
   return null;
 }
 
+/**
+ * Detect the package manager for a Node.js project by checking lockfiles.
+ * Walks up from dir to find the nearest lockfile (supports monorepos).
+ * Returns { pm, run, exec } where:
+ *   pm   - 'yarn' | 'pnpm' | 'bun' | 'npm'
+ *   run  - command to run a script, e.g. 'yarn test' or 'npm test'
+ *   exec - command to execute a binary, e.g. 'yarn exec' or 'npx'
+ */
+function _detectPackageManager(startDir) {
+  const lockfiles = [
+    { file: 'yarn.lock', pm: 'yarn', run: 'yarn', exec: 'yarn exec' },
+    { file: 'pnpm-lock.yaml', pm: 'pnpm', run: 'pnpm', exec: 'pnpm exec' },
+    { file: 'bun.lockb', pm: 'bun', run: 'bun', exec: 'bunx' },
+    { file: 'bun.lock', pm: 'bun', run: 'bun', exec: 'bunx' },
+  ];
+
+  let dir = startDir;
+  while (true) {
+    for (const { file, pm, run, exec } of lockfiles) {
+      if (fs.existsSync(path.join(dir, file))) {
+        return { pm, run, exec };
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
+  }
+
+  // Default to npm
+  return { pm: 'npm', run: 'npm', exec: 'npx' };
+}
+
 module.exports = {
   /**
    * Find the project bead in the current beads database.
@@ -3167,20 +3199,77 @@ module.exports = {
    * Auto-detect the project's test runner by inspecting config files.
    *
    * Checks (in order): package.json, Cargo.toml, pyproject.toml, setup.cfg,
-   * go.mod. Returns JSON with:
+   * go.mod. Detects the package manager from lockfiles (yarn.lock, pnpm-lock.yaml,
+   * bun.lockb) and uses the correct run command.
+   *
+   * Results are cached via bd kv under "forge.test-runner.<dir-hash>". Pass --no-cache
+   * to force re-detection.
+   *
+   * Returns JSON with:
    *   runner         - executable name (e.g. 'node', 'cargo', 'pytest')
-   *   command        - full command to run tests (e.g. 'npm test')
-   *   framework      - test framework identifier (e.g. 'node:test', 'jest')
+   *   command        - full command to run tests (e.g. 'yarn test', 'pnpm test')
+   *   framework      - test framework identifier (e.g. 'node:test', 'vitest')
    *   test_directory - directory containing tests (e.g. 'tests/')
+   *   package_manager - detected package manager (e.g. 'yarn', 'npm')
    *
    * All fields are null when no recognizable config is found.
    *
-   * Usage: forge-tools detect-test-runner [directory]
+   * Usage: forge-tools detect-test-runner [directory] [--no-cache]
    */
   'detect-test-runner'(args) {
-    const targetDir = args[0] ? path.resolve(args[0]) : process.cwd();
+    const noCache = args.includes('--no-cache');
+    const positional = args.filter(a => a !== '--no-cache');
+    const targetDir = positional[0] ? path.resolve(positional[0]) : process.cwd();
 
-    const NULL_RESULT = { runner: null, command: null, framework: null, test_directory: null };
+    const NULL_RESULT = { runner: null, command: null, framework: null, test_directory: null, package_manager: null };
+
+    // --- Cache: check bd kv first ---
+    const cacheKey = `forge.test-runner.${Buffer.from(targetDir).toString('base64url').slice(0, 32)}`;
+    if (!noCache) {
+      try {
+        const cached = bdArgs(['kv', 'get', cacheKey]);
+        if (cached && cached.trim()) {
+          const parsed = JSON.parse(cached.trim());
+          if (parsed && parsed.runner !== undefined) {
+            output(parsed);
+            return;
+          }
+        }
+      } catch {
+        // Cache miss or parse failure — proceed with detection
+      }
+    }
+
+    /** Persist result to bd kv and output it. */
+    function emitResult(result) {
+      try {
+        bdArgs(['kv', 'set', cacheKey, JSON.stringify(result)]);
+      } catch {
+        // Cache write failure is non-fatal
+      }
+      output(result);
+    }
+
+    /**
+     * Normalize a test path from a script argument: strip quotes, extract base
+     * dir from globs, ensure trailing slash.
+     */
+    function normalizeTestPath(raw, fallbackDir) {
+      if (!raw) return fallbackDir;
+      let p = raw.replace(/^['"]|['"]$/g, '');
+      if (/[*?[\]]/.test(p)) {
+        const parts = p.split('/');
+        const baseParts = [];
+        for (const part of parts) {
+          if (/[*?[\]]/.test(part)) break;
+          baseParts.push(part);
+        }
+        p = baseParts.length > 0 ? baseParts.join('/') : null;
+      }
+      if (!p) return fallbackDir;
+      if (!p.endsWith('/')) p += '/';
+      return p;
+    }
 
     // --- Node.js / package.json ---
     const pkgRaw = _readFileIn(targetDir, 'package.json');
@@ -3188,74 +3277,59 @@ module.exports = {
       try {
         const pkg = JSON.parse(pkgRaw);
         const testScript = pkg.scripts && pkg.scripts.test;
+        const pm = _detectPackageManager(targetDir);
+        const runTest = `${pm.run} test`;
 
         if (testScript) {
           // Detect node built-in test runner
           if (/\bnode\s+--test\b/.test(testScript)) {
-            // Extract test directory from the script if present
             const dirMatch = testScript.match(/node\s+--test\s+(\S+)/);
-            let testDir = dirMatch ? dirMatch[1] : _findTestDir(targetDir);
-            if (testDir) {
-              // Strip surrounding quotes
-              testDir = testDir.replace(/^['"]|['"]$/g, '');
-              // If it contains glob characters, extract base directory
-              if (/[*?[\]]/.test(testDir)) {
-                const parts = testDir.split('/');
-                const baseParts = [];
-                for (const part of parts) {
-                  if (/[*?[\]]/.test(part)) break;
-                  baseParts.push(part);
-                }
-                testDir = baseParts.length > 0 ? baseParts.join('/') : _findTestDir(targetDir);
-              }
-              // Ensure trailing slash for directories
-              if (testDir && !testDir.endsWith('/')) testDir += '/';
-            }
-            output({ runner: 'node', command: 'npm test', framework: 'node:test', test_directory: testDir || _findTestDir(targetDir) });
+            const testDir = normalizeTestPath(dirMatch && dirMatch[1], _findTestDir(targetDir));
+            emitResult({ runner: 'node', command: runTest, framework: 'node:test', test_directory: testDir || _findTestDir(targetDir), package_manager: pm.pm });
             return;
           }
 
           // Detect vitest
           if (/\bvitest\b/.test(testScript)) {
-            output({ runner: 'vitest', command: 'npm test', framework: 'vitest', test_directory: _findTestDir(targetDir) });
+            emitResult({ runner: 'vitest', command: runTest, framework: 'vitest', test_directory: _findTestDir(targetDir), package_manager: pm.pm });
             return;
           }
 
           // Detect jest
           if (/\bjest\b/.test(testScript)) {
-            output({ runner: 'jest', command: 'npm test', framework: 'jest', test_directory: _findTestDir(targetDir) || '__tests__/' });
+            emitResult({ runner: 'jest', command: runTest, framework: 'jest', test_directory: _findTestDir(targetDir) || '__tests__/', package_manager: pm.pm });
             return;
           }
 
           // Detect mocha
           if (/\bmocha\b/.test(testScript)) {
-            output({ runner: 'mocha', command: 'npm test', framework: 'mocha', test_directory: _findTestDir(targetDir) || 'test/' });
+            emitResult({ runner: 'mocha', command: runTest, framework: 'mocha', test_directory: _findTestDir(targetDir) || 'test/', package_manager: pm.pm });
             return;
           }
 
           // Detect tap/node-tap
           if (/\btap\b/.test(testScript)) {
-            output({ runner: 'tap', command: 'npm test', framework: 'tap', test_directory: _findTestDir(targetDir) || 'test/' });
+            emitResult({ runner: 'tap', command: runTest, framework: 'tap', test_directory: _findTestDir(targetDir) || 'test/', package_manager: pm.pm });
             return;
           }
 
           // Detect ava
           if (/\bava\b/.test(testScript)) {
-            output({ runner: 'ava', command: 'npm test', framework: 'ava', test_directory: _findTestDir(targetDir) || 'test/' });
+            emitResult({ runner: 'ava', command: runTest, framework: 'ava', test_directory: _findTestDir(targetDir) || 'test/', package_manager: pm.pm });
             return;
           }
 
-          // Generic npm test fallback (has a test script but unrecognized runner)
-          output({ runner: 'npm', command: 'npm test', framework: 'unknown', test_directory: _findTestDir(targetDir) });
+          // Generic fallback (has a test script but unrecognized runner)
+          emitResult({ runner: pm.pm, command: runTest, framework: 'unknown', test_directory: _findTestDir(targetDir), package_manager: pm.pm });
           return;
         }
 
         // Check devDependencies for known test frameworks (no test script)
         const deps = { ...pkg.devDependencies, ...pkg.dependencies };
         if (deps) {
-          if (deps.vitest) { output({ runner: 'vitest', command: 'npx vitest', framework: 'vitest', test_directory: _findTestDir(targetDir) }); return; }
-          if (deps.jest) { output({ runner: 'jest', command: 'npx jest', framework: 'jest', test_directory: _findTestDir(targetDir) || '__tests__/' }); return; }
-          if (deps.mocha) { output({ runner: 'mocha', command: 'npx mocha', framework: 'mocha', test_directory: _findTestDir(targetDir) || 'test/' }); return; }
+          if (deps.vitest) { emitResult({ runner: 'vitest', command: `${pm.exec} vitest`, framework: 'vitest', test_directory: _findTestDir(targetDir), package_manager: pm.pm }); return; }
+          if (deps.jest) { emitResult({ runner: 'jest', command: `${pm.exec} jest`, framework: 'jest', test_directory: _findTestDir(targetDir) || '__tests__/', package_manager: pm.pm }); return; }
+          if (deps.mocha) { emitResult({ runner: 'mocha', command: `${pm.exec} mocha`, framework: 'mocha', test_directory: _findTestDir(targetDir) || 'test/', package_manager: pm.pm }); return; }
         }
       } catch {
         // Malformed package.json, continue to other checks
@@ -3264,7 +3338,7 @@ module.exports = {
 
     // --- Rust / Cargo.toml ---
     if (_fileExistsIn(targetDir, 'Cargo.toml')) {
-      output({ runner: 'cargo', command: 'cargo test', framework: 'cargo:test', test_directory: _findTestDir(targetDir) || 'tests/' });
+      emitResult({ runner: 'cargo', command: 'cargo test', framework: 'cargo:test', test_directory: _findTestDir(targetDir) || 'tests/', package_manager: null });
       return;
     }
 
@@ -3272,33 +3346,33 @@ module.exports = {
     const pyprojectRaw = _readFileIn(targetDir, 'pyproject.toml');
     if (pyprojectRaw) {
       if (/\[tool\.pytest\b/.test(pyprojectRaw) || /\bpytest\b/.test(pyprojectRaw)) {
-        output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: _findTestDir(targetDir) || 'tests/' });
+        emitResult({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: _findTestDir(targetDir) || 'tests/', package_manager: null });
         return;
       }
       if (/\[tool\.unittest\b/.test(pyprojectRaw)) {
-        output({ runner: 'python', command: 'python -m unittest discover', framework: 'unittest', test_directory: _findTestDir(targetDir) || 'tests/' });
+        emitResult({ runner: 'python', command: 'python -m unittest discover', framework: 'unittest', test_directory: _findTestDir(targetDir) || 'tests/', package_manager: null });
         return;
       }
       // Generic Python project -- no pytest/unittest markers found; don't assume pytest
-      output(NULL_RESULT);
+      emitResult(NULL_RESULT);
       return;
     }
 
     const setupCfgRaw = _readFileIn(targetDir, 'setup.cfg');
     if (setupCfgRaw) {
       if (/\[tool:pytest\]/.test(setupCfgRaw)) {
-        output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: _findTestDir(targetDir) || 'tests/' });
+        emitResult({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: _findTestDir(targetDir) || 'tests/', package_manager: null });
         return;
       }
     }
 
     // --- Go / go.mod ---
     if (_fileExistsIn(targetDir, 'go.mod')) {
-      output({ runner: 'go', command: 'go test ./...', framework: 'go:test', test_directory: _findTestDir(targetDir) || './' });
+      emitResult({ runner: 'go', command: 'go test ./...', framework: 'go:test', test_directory: _findTestDir(targetDir) || './', package_manager: null });
       return;
     }
 
     // --- No recognizable test config ---
-    output(NULL_RESULT);
+    emitResult(NULL_RESULT);
   },
 };

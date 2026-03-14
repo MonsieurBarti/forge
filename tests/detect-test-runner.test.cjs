@@ -22,11 +22,13 @@ describe('detect-test-runner', () => {
     assert.ok('command' in result, 'output should have command field');
     assert.ok('framework' in result, 'output should have framework field');
     assert.ok('test_directory' in result, 'output should have test_directory field');
+    assert.ok('package_manager' in result, 'output should have package_manager field');
 
-    // This is a Node.js project using node --test
+    // This is a Node.js project using node --test with no lockfile (npm default)
     assert.equal(result.runner, 'node');
     assert.equal(result.command, 'npm test');
     assert.equal(result.framework, 'node:test');
+    assert.equal(result.package_manager, 'npm');
     assert.ok(result.test_directory, 'test_directory should not be null');
   });
 });
