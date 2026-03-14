@@ -10,7 +10,9 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFileSync } = require('child_process');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 
 const BRIDGE_FILE = path.join(os.tmpdir(), 'forge-context-bridge.json');
 
@@ -24,20 +26,39 @@ async function main() {
 
     const data = JSON.parse(input);
 
-    // Write bridge for context-monitor
+    // Write bridge file with context, cost, and token data
+    const bridge = { timestamp: Date.now() };
+
     if (data.context_remaining !== undefined) {
-      fs.writeFileSync(BRIDGE_FILE, JSON.stringify({
-        context_remaining: data.context_remaining,
-        timestamp: Date.now(),
-      }));
+      bridge.context_remaining = data.context_remaining;
     }
 
-    // Try to get current project status with progress
+    // Cost data
+    if (data.cost && data.cost.total_cost_usd !== undefined) {
+      bridge.total_cost_usd = data.cost.total_cost_usd;
+    }
+
+    // Token data
+    if (data.context_window) {
+      if (data.context_window.total_input_tokens !== undefined) {
+        bridge.input_tokens = data.context_window.total_input_tokens;
+      }
+      if (data.context_window.total_output_tokens !== undefined) {
+        bridge.output_tokens = data.context_window.total_output_tokens;
+      }
+      if (data.context_window.current_usage !== undefined) {
+        bridge.current_usage = data.context_window.current_usage;
+      }
+    }
+
+    fs.writeFileSync(BRIDGE_FILE, JSON.stringify(bridge), { mode: 0o600 });
+
+    // Try to get current project status with progress (async to avoid blocking)
     let status = '';
     try {
       const toolsPath = path.join(os.homedir(), '.claude', 'forge', 'bin', 'forge-tools.cjs');
-      const result = execFileSync('node', [toolsPath, 'find-project'], {
-        encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+      const { stdout: result } = await execFileAsync('node', [toolsPath, 'find-project'], {
+        encoding: 'utf8', timeout: 3000,
       });
 
       const project = JSON.parse(result);
@@ -45,8 +66,8 @@ async function main() {
         const p = project.projects[0];
         // Try to get progress summary
         try {
-          const progressResult = execFileSync('node', [toolsPath, 'progress', p.id], {
-            encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+          const { stdout: progressResult } = await execFileAsync('node', [toolsPath, 'progress', p.id], {
+            encoding: 'utf8', timeout: 3000,
           });
           const progress = JSON.parse(progressResult);
           const pct = progress.progress?.percent || 0;
