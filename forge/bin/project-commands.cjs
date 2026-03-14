@@ -311,7 +311,7 @@ function collectProjectIssues(projectId) {
 
   const classifyIssue = (item) => {
     if ((item.labels || []).includes('forge:phase')) return 'phase';
-    if ((item.labels || []).includes('forge:req') || item.issue_type === 'feature') return 'req';
+    if ((item.labels || []).includes('forge:req')) return 'req';
     return null;
   };
 
