@@ -159,8 +159,16 @@ If user selects "Cancel": exit gracefully.
 </step>
 
 <step name="discover_test_structure">
-Before generating the test plan, discover the project's existing test structure:
+Before generating the test plan, discover the project's existing test structure.
 
+**Primary detection -- use detect-test-runner:**
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" detect-test-runner
+```
+This returns a JSON object with `runner`, `command`, `framework`, and `test_directory` fields.
+Use these values as the authoritative test configuration for all subsequent steps.
+
+**Fallback -- filesystem heuristics (only if detect-test-runner fails or returns incomplete data):**
 ```bash
 # Find existing test directories
 find . -type d -name "*test*" -o -name "*spec*" -o -name "*__tests__*" 2>/dev/null | head -20
@@ -170,11 +178,15 @@ find . -type f \( -name "*.test.*" -o -name "*.spec.*" -o -name "*Tests.*" -o -n
 ls package.json *.sln Cargo.toml pyproject.toml 2>/dev/null
 ```
 
-Identify:
+From the detection results, identify:
 - Test directory structure (where unit tests live, where E2E tests live)
 - Naming conventions (`.test.ts`, `.spec.ts`, `*Tests.fs`, `_test.go`, etc.)
 - Test runner commands (how to execute unit tests, how to execute E2E tests)
 - Test framework (Jest, Playwright, xUnit, pytest, cargo test, etc.)
+
+**Test file naming convention for generated tests:**
+Place per-task test files at: `tests/forge/<phase-slug>/task-<task-id>.test.cjs`
+For example: `tests/forge/phase-abc/task-xyz.test.cjs`
 
 If test structure is ambiguous, ask the user:
 ```
