@@ -3169,8 +3169,22 @@ module.exports = {
             // Extract test directory from the script if present
             const dirMatch = testScript.match(/node\s+--test\s+(\S+)/);
             let testDir = dirMatch ? dirMatch[1] : findTestDir();
-            // Ensure trailing slash for directories
-            if (testDir && !testDir.endsWith('/')) testDir += '/';
+            if (testDir) {
+              // Strip surrounding quotes
+              testDir = testDir.replace(/^['"]|['"]$/g, '');
+              // If it contains glob characters, extract base directory
+              if (/[*?[\]]/.test(testDir)) {
+                const parts = testDir.split('/');
+                const baseParts = [];
+                for (const part of parts) {
+                  if (/[*?[\]]/.test(part)) break;
+                  baseParts.push(part);
+                }
+                testDir = baseParts.length > 0 ? baseParts.join('/') : findTestDir();
+              }
+              // Ensure trailing slash for directories
+              if (testDir && !testDir.endsWith('/')) testDir += '/';
+            }
             output({ runner: 'node', command: 'npm test', framework: 'node:test', test_directory: testDir || findTestDir() });
             return;
           }
