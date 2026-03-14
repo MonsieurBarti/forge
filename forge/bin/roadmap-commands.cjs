@@ -43,7 +43,8 @@ module.exports = {
         const depsRaw = bd(`dep list ${phase.id} --json`, { allowFail: true });
         let deps = [];
         if (depsRaw) {
-          try { deps = JSON.parse(depsRaw); } catch {}
+          // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist.
+          try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
           if (!Array.isArray(deps)) deps = deps.dependencies || [];
         }
         const hasMilestoneParent = deps.some(d =>

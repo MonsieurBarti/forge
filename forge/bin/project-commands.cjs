@@ -46,6 +46,8 @@ function parseBdCreateId(result) {
     const data = JSON.parse(result);
     return data.id || data.issue_id || null;
   } catch {
+    // INTENTIONALLY SILENT: bd create output format varies between versions;
+    // fallback to regex extraction handles non-JSON output gracefully.
     const match = result.match(/([a-z]+-[a-z0-9]+)/);
     return match ? match[1] : null;
   }
@@ -94,7 +96,7 @@ function loadMergedSettings() {
       }
     }
   } catch {
-    // No global settings file
+    // INTENTIONALLY SILENT: global settings file is optional; defaults suffice
   }
 
   try {
@@ -108,7 +110,7 @@ function loadMergedSettings() {
       }
     }
   } catch {
-    // No project settings file
+    // INTENTIONALLY SILENT: project settings file is optional; defaults suffice
   }
 
   return { merged, sources };
@@ -169,11 +171,11 @@ function expandGlobs(patterns, root) {
               try {
                 const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
                 if (pkg.name) name = pkg.name;
-              } catch { /* use dir name */ }
+              } catch { /* INTENTIONALLY SILENT: package.json is optional; dir name suffices */ }
               results.push({ name, path: pkgPath });
             }
           }
-        } catch { /* skip unreadable */ }
+        } catch { /* INTENTIONALLY SILENT: unreadable directory entries are skipped during workspace detection */ }
       } else {
         // Direct path (no glob)
         const pkgJsonPath = path.join(root, clean, 'package.json');
@@ -181,7 +183,7 @@ function expandGlobs(patterns, root) {
         try {
           const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
           if (pkg.name) name = pkg.name;
-        } catch { /* use dir name */ }
+        } catch { /* INTENTIONALLY SILENT: package.json is optional; dir name suffices */ }
         results.push({ name, path: clean });
       }
     }
@@ -198,7 +200,7 @@ function detectWorkspaces(rootDir) {
   let rootPkg = null;
   try {
     rootPkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-  } catch { /* no root package.json */ }
+  } catch { /* INTENTIONALLY SILENT: root package.json is optional for workspace detection */ }
 
   // Try pnpm-workspace.yaml
   const pnpmPath = path.join(rootDir, 'pnpm-workspace.yaml');
@@ -221,7 +223,7 @@ function detectWorkspaces(rootDir) {
       if (patterns.length > 0) {
         return { source: 'pnpm-workspace.yaml', packages: expandGlobs(patterns, rootDir) };
       }
-    } catch { /* fall through */ }
+    } catch { /* INTENTIONALLY SILENT: pnpm-workspace.yaml parse failure falls through to other detection methods */ }
   }
 
   // Try turbo.json (Turborepo reads workspaces from package.json)
@@ -318,6 +320,8 @@ function resolveProject() {
     // Fallback to first project
     return { id: issues[0].id, title: issues[0].title || issues[0].subject };
   } catch {
+    // INTENTIONALLY SILENT: bd list parse failure means no project can be resolved;
+    // returning null lets callers handle the missing-project case explicitly.
     return null;
   }
 }
@@ -465,7 +469,8 @@ function getRequirementCoverage(requirements) {
     const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
     let deps = [];
     if (depsRaw) {
-      try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+      // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist.
+      try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
     }
     coverage.push({
       id: req.id,
@@ -506,7 +511,7 @@ function computeCostEstimate(phaseId) {
           }
         }
       }
-    } catch { /* parse error */ }
+    } catch { /* INTENTIONALLY SILENT: non-JSON bd output falls back to empty/null */ }
   }
 
   // Get sibling closed phases
@@ -537,7 +542,7 @@ function computeCostEstimate(phaseId) {
           historicalCosts.push({ phase_id: sibling.id, total_usd: costData.total_usd, task_count: taskCount });
         }
       }
-    } catch { /* invalid JSON */ }
+    } catch { /* INTENTIONALLY SILENT: invalid or missing JSON data is handled by null fallback */ }
   }
 
   // Count tasks in target phase
@@ -612,9 +617,9 @@ function collectAgentRoster() {
             vibe: fm.vibe || fm.emoji || '',
           });
         }
-      } catch { /* skip unreadable agent files */ }
+      } catch { /* INTENTIONALLY SILENT: unreadable agent files are skipped during roster collection */ }
     }
-  } catch { /* skip unreadable agents dir */ }
+  } catch { /* INTENTIONALLY SILENT: unreadable agents directory is non-fatal */ }
 
   return agents;
 }
@@ -1495,7 +1500,7 @@ module.exports = {
                   output({ found: true, project_id: mono.id, project_title: mono.title || mono.subject, projects: issues, source: 'monorepo_parent' });
                   return;
                 }
-              } catch { /* fall through */ }
+              } catch { /* INTENTIONALLY SILENT: monorepo lookup failure falls through to first-project fallback */ }
             }
             // Still no match — return first project as last resort (only inside a git repo)
             const firstProject = issues[0];
@@ -1508,7 +1513,7 @@ module.exports = {
           return;
         }
       } catch {
-        // fall through to cwd check
+        // INTENTIONALLY SILENT: bd list JSON parse failure falls through to cwd settings check
       }
     }
 
@@ -1523,7 +1528,7 @@ module.exports = {
           return;
         }
       } catch {
-        // fall through
+        // INTENTIONALLY SILENT: settings YAML parse failure falls through to found:false
       }
     }
 
@@ -1774,7 +1779,7 @@ module.exports = {
         const data = JSON.parse(projectResult);
         const issues = Array.isArray(data) ? data : (data.issues || []);
         if (issues.length > 0) project = issues[0];
-      } catch { /* ignore */ }
+      } catch { /* INTENTIONALLY SILENT: non-JSON bd output falls back to no-project path */ }
     }
 
     if (!project) {
@@ -1821,12 +1826,7 @@ module.exports = {
 
     const project = bdJson(`show ${projectId}`);
     if (!project) {
-      output({
-        error: 'Project not found',
-        project_id: projectId,
-        suggestion: 'Verify the project ID with: bd show ' + projectId + ', or run /forge:new to create a new project'
-      });
-      return;
+      forgeError('NOT_FOUND', `Project not found: ${projectId}`, 'Verify the project ID with: forge-tools find-project, or run /forge:new to create a new project', { project_id: projectId });
     }
 
     const { phases, requirements } = collectProjectIssues(projectId);
@@ -2070,7 +2070,7 @@ module.exports = {
       try {
         versionInfo = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
         versionOk = !!(versionInfo && versionInfo.version);
-      } catch { /* invalid JSON */ }
+      } catch { /* INTENTIONALLY SILENT: invalid or missing JSON data is handled by null fallback */ }
     }
 
     diagnostics.installation.push({
@@ -2210,7 +2210,7 @@ module.exports = {
         existing = parseFrontmatter(text);
         const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
         if (bodyMatch) body = bodyMatch[1];
-      } catch { /* new file */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
       setNestedKey(existing, topKey, subKey, parsedValue);
       writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
       output({ ok: true, scope, key, value: parsedValue });
@@ -2219,7 +2219,7 @@ module.exports = {
       let existing = {};
       try {
         existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      } catch { /* new file */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
       setNestedKey(existing, topKey, subKey, parsedValue);
       const dir = path.dirname(projectPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -2260,14 +2260,14 @@ module.exports = {
         const body = bodyMatch ? bodyMatch[1] : '';
         clearNestedKey(existing, topKey, subKey);
         writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
-      } catch { /* file doesn't exist, nothing to clear */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist; nothing to clear */ }
     } else if (scope === 'project') {
       const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
       try {
         const existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
         clearNestedKey(existing, topKey, subKey);
         fs.writeFileSync(projectPath, toSimpleYaml(existing));
-      } catch { /* file doesn't exist */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist; nothing to clear */ }
     }
 
     output({ ok: true, scope, key, cleared: true });
@@ -2301,7 +2301,7 @@ module.exports = {
         existing = parseFrontmatter(text);
         const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
         if (bodyMatch) body = bodyMatch[1];
-      } catch { /* new file */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
       for (const [key, value] of Object.entries(updates)) {
         if (!(key in SETTINGS_DEFAULTS)) continue;
         const parsedValue = coerceBool(value);
@@ -2314,7 +2314,7 @@ module.exports = {
       let existing = {};
       try {
         existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      } catch { /* new file */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
       for (const [key, value] of Object.entries(updates)) {
         if (!(key in SETTINGS_DEFAULTS)) continue;
         const parsedValue = coerceBool(value);
@@ -2418,7 +2418,8 @@ module.exports = {
     const raw = bd('kv list --json', { allowFail: true });
     let kvMap = {};
     if (raw) {
-      try { kvMap = JSON.parse(raw); } catch { /* ignore */ }
+      // INTENTIONALLY SILENT: bd kv list may return non-JSON; empty map is safe fallback
+      try { kvMap = JSON.parse(raw); } catch { /* allowFail JSON parse fallback */ }
     }
     if (Array.isArray(kvMap)) {
       const obj = {};
@@ -2474,6 +2475,8 @@ module.exports = {
       }));
       output({ sessions });
     } catch {
+      // INTENTIONALLY SILENT: bd list JSON parse failure returns empty set with suggestion.
+      // This is not a fatal error -- the user simply has no debug sessions.
       output({ sessions: [], suggestion: debugHint });
     }
   },
@@ -2555,6 +2558,8 @@ module.exports = {
       }));
       output({ todo_count: todos.length, todos });
     } catch {
+      // INTENTIONALLY SILENT: bd list JSON parse failure returns empty set with suggestion.
+      // This is not a fatal error -- the user simply has no todos.
       output({ todo_count: 0, todos: [], suggestion: todoHint });
     }
   },
@@ -2677,7 +2682,7 @@ module.exports = {
         try {
           const deps = JSON.parse(depsRaw);
           validators = Array.isArray(deps) ? deps : (deps.dependencies || []);
-        } catch { /* parse error */ }
+        } catch { /* INTENTIONALLY SILENT: non-JSON bd output falls back to empty/null */ }
       }
       const closedValidators = validators.filter(v => v.status === 'closed');
       let coverage = 'unsatisfied';
@@ -2729,6 +2734,7 @@ module.exports = {
     const title = `Milestone: ${name}`;
     const createRaw = bdArgs(['create', `--title=${title}`, '--type=epic', '--priority=1', '--json']);
     let created;
+    // INTENTIONALLY SILENT: bd create output format varies; null fallback triggers forgeError below.
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
       forgeError('COMMAND_FAILED', 'Failed to create milestone bead', 'Check bd connectivity with: bd list --limit 1');
@@ -2762,6 +2768,7 @@ module.exports = {
     const title = name;
     const createRaw = bdArgs(['create', `--title=${title}`, '--type=epic', '--priority=1', '--json']);
     let created;
+    // INTENTIONALLY SILENT: bd create output format varies; null fallback triggers forgeError below.
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
       forgeError('COMMAND_FAILED', 'Failed to create monorepo bead', 'Check bd connectivity with: bd list --limit 1');
@@ -2775,6 +2782,7 @@ module.exports = {
     for (const pkg of detected.packages) {
       const childRaw = bdArgs(['create', `--title=${pkg.name}`, '--type=epic', '--priority=2', '--json']);
       let child;
+      // INTENTIONALLY SILENT: bd create output format varies; null fallback skips this package.
       try { child = JSON.parse(childRaw); if (Array.isArray(child)) child = child[0]; } catch { child = null; }
       if (!child || !child.id) continue;
 
@@ -2815,7 +2823,7 @@ module.exports = {
         const data = JSON.parse(projectResult);
         const issues = Array.isArray(data) ? data : (data.issues || []);
         if (issues.length > 0) project = issues[0];
-      } catch { /* parse error */ }
+      } catch { /* INTENTIONALLY SILENT: non-JSON bd output falls back to empty/null */ }
     }
 
     const models = {
@@ -2926,6 +2934,8 @@ module.exports = {
         }
       }
     } catch {
+      // INTENTIONALLY SILENT: bridge file is ephemeral and may not exist;
+      // the note is surfaced in the output for the user.
       bridgeNote = 'Bridge file not found or unreadable';
     }
 
@@ -2938,7 +2948,7 @@ module.exports = {
         try {
           const costRecord = JSON.parse(costRaw.trim());
           phaseCostUsd = costRecord.total_usd || 0;
-        } catch { /* ignore corrupt data */ }
+        } catch { /* INTENTIONALLY SILENT: corrupt cost data in bd kv falls back to null */ }
       }
     }
 
@@ -3019,7 +3029,8 @@ module.exports = {
       const raw = fs.readFileSync(bridgePath, 'utf8');
       bridgeData = JSON.parse(raw);
     } catch {
-      // Bridge file missing or invalid
+      // INTENTIONALLY SILENT: bridge file is ephemeral and may not exist;
+      // null bridgeData is handled by the warning output below.
     }
 
     if (!bridgeData || bridgeData.total_cost_usd === undefined || bridgeData.total_cost_usd === null) {
@@ -3044,7 +3055,8 @@ module.exports = {
       try {
         record = JSON.parse(existingRaw.trim());
       } catch {
-        // Corrupt data, start fresh
+        // INTENTIONALLY SILENT: corrupt cost record in bd kv is recoverable;
+        // starting fresh with null record is the correct self-healing behavior.
         record = null;
       }
     }

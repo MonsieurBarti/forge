@@ -100,7 +100,7 @@ module.exports = {
       if (fs.existsSync(parent) && fs.readdirSync(parent).length === 0) {
         fs.rmdirSync(parent);
       }
-    } catch { /* ignore */ }
+    } catch { /* INTENTIONALLY SILENT: empty parent dir cleanup is best-effort */ }
 
     output({ removed: true, path: wtPath });
   },

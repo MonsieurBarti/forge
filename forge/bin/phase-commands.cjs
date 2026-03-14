@@ -131,7 +131,9 @@ module.exports = {
         const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
         let deps = [];
         if (depsRaw) {
-          try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+          // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist;
+          // the fallback to empty array is the correct behavior.
+          try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
         }
         if (!Array.isArray(deps) || deps.length === 0) {
           uncoveredReqs.push({ id: req.id, title: req.title });
@@ -193,7 +195,9 @@ module.exports = {
     const depsRaw = bd(`dep list ${phaseId} --json`, { allowFail: true });
     let deps = [];
     if (depsRaw) {
-      try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+      // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist;
+      // the fallback to empty array is the correct behavior.
+      try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
     }
     const blockerDeps = Array.isArray(deps)
       ? deps.filter(d => d.type === 'blocks' || d.type === 'predecessor' || d.type === 'blocked-by')
@@ -261,12 +265,7 @@ module.exports = {
     const tasks = normalizeChildren(children);
 
     if (tasks.length === 0) {
-      output({
-        phase_id: phaseId,
-        waves: [],
-        summary: { total_tasks: 0, total_waves: 0 },
-        suggestion: 'No tasks in this phase. Add tasks with: bd create --title "<task>" --parent ' + phaseId
-      });
+      output({ phase_id: phaseId, waves: [], summary: { total_tasks: 0, total_waves: 0 } });
       return;
     }
 
@@ -281,7 +280,9 @@ module.exports = {
       const depsRaw = bd(`dep list ${task.id} --type blocks --json`, { allowFail: true });
       let deps = [];
       if (depsRaw) {
-        try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+        // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist;
+        // the fallback to empty array is the correct behavior.
+        try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
       }
       if (!Array.isArray(deps)) deps = [];
       const intraPhaseDeps = deps
@@ -426,7 +427,10 @@ module.exports = {
       if (match) {
         checkpoint = JSON.parse(match[1]);
       }
-    } catch { /* corrupt or missing — handled below */ }
+    } catch {
+      // INTENTIONALLY SILENT: checkpoint data may be corrupt or missing;
+      // the fallback to bd memories lookup below handles this gracefully.
+    }
 
     if (!checkpoint) {
       try {
@@ -438,14 +442,14 @@ module.exports = {
             checkpoint = JSON.parse(jsonMatch[0]);
           }
         }
-      } catch { /* ignore */ }
+      } catch {
+        // INTENTIONALLY SILENT: bd memories may return non-JSON or fail;
+        // returning found:false below is the correct fallback.
+      }
     }
 
     if (!checkpoint) {
-      output({
-        found: false,
-        suggestion: 'No checkpoint found for this phase. Save one with: forge-tools checkpoint-save ' + phaseId
-      });
+      output({ found: false, suggestion: 'No checkpoint found for this phase. Save one with: forge-tools checkpoint-save <phase-id> <checkpoint-json>' });
       return;
     }
 
@@ -539,6 +543,8 @@ module.exports = {
 
     const createRaw = bdArgs(['create', `--title=${title}`, `--description=${description}`, '--type=epic', '--priority=1', '--json']);
     let created;
+    // INTENTIONALLY SILENT: bd create output format varies; fallback to null triggers
+    // the forgeError below which provides an actionable suggestion.
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
       forgeError('COMMAND_FAILED', 'Failed to create phase bead', 'Check bd connectivity with: bd list --limit 1');
@@ -627,6 +633,8 @@ module.exports = {
 
     const createRaw = bdArgs(['create', `--title=${title}`, `--description=${description}`, '--type=epic', '--priority=1', '--json']);
     let created;
+    // INTENTIONALLY SILENT: bd create output format varies; fallback to null triggers
+    // the forgeError below which provides an actionable suggestion.
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
       forgeError('COMMAND_FAILED', 'Failed to create phase bead', 'Check bd connectivity with: bd list --limit 1');
@@ -709,7 +717,8 @@ module.exports = {
     const targetDepsRaw = bd(`dep list ${targetPhase.id} --json`, { allowFail: true });
     let targetDeps = [];
     if (targetDepsRaw) {
-      try { targetDeps = JSON.parse(targetDepsRaw); } catch { /* ignore */ }
+      // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist.
+      try { targetDeps = JSON.parse(targetDepsRaw); } catch { /* allowFail JSON parse fallback */ }
     }
     if (!Array.isArray(targetDeps)) targetDeps = [];
 
@@ -727,7 +736,8 @@ module.exports = {
       const depsRaw = bd(`dep list ${phase.id} --json`, { allowFail: true });
       let deps = [];
       if (depsRaw) {
-        try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+        // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist.
+        try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
       }
       if (!Array.isArray(deps)) deps = [];
       const dependsOnTarget = deps.some(d => {
@@ -840,11 +850,7 @@ module.exports = {
 
     const children = bdJson(`children ${projectId}`);
     if (!children) {
-      output({
-        found: false,
-        phase: null,
-        suggestion: 'No phases found for this project. Run /forge:plan to create phases, or verify the project ID with: bd show ' + projectId
-      });
+      output({ found: false, phase: null, suggestion: 'No phases found for this project. Run /forge:plan to create phases, or verify the project ID with: bd show ' + projectId });
       return;
     }
 
@@ -862,13 +868,8 @@ module.exports = {
     if (found) {
       output({ found: true, phase: found.phase });
     } else {
-      const availNums = numbered.map(e => e.n).join(', ');
-      output({
-        found: false,
-        phase: null,
-        available: numbered.map(e => ({ n: e.n, id: e.phase.id, title: e.phase.title })),
-        suggestion: 'Phase ' + num + ' does not exist. Available phases: ' + availNums + '. Use: forge-tools resolve-phase ' + projectId + ' <number>'
-      });
+      const availableNums = numbered.map(e => e.n).join(', ');
+      output({ found: false, phase: null, available: numbered.map(e => ({ n: e.n, id: e.phase.id, title: e.phase.title })), suggestion: 'Phase ' + num + ' does not exist. Available phase numbers: ' + availableNums + '. Use one of these with: forge-tools resolve-phase ' + projectId + ' <number>' });
     }
   },
 
@@ -912,7 +913,9 @@ module.exports = {
       bdArgs(['comments', 'add', phaseId, '-f', tmpFile]);
       output({ written: true, phaseId, agent: schema.agent, task: schema.task });
     } finally {
-      try { fs.unlinkSync(tmpFile); } catch {}
+      // INTENTIONALLY SILENT: temp file cleanup is best-effort; failure to unlink
+      // a /tmp file does not affect the command's result.
+      try { fs.unlinkSync(tmpFile); } catch { /* cleanup best-effort */ }
     }
   },
 
@@ -927,11 +930,7 @@ module.exports = {
 
     const comments = bdJson(`comments ${phaseId}`);
     if (!comments) {
-      output({
-        phaseId,
-        contexts: [],
-        suggestion: 'No context written yet. Write context with: forge-tools context-write ' + phaseId + ' <json-string>'
-      });
+      output({ phaseId, contexts: [] });
       return;
     }
 
@@ -946,7 +945,8 @@ module.exports = {
           contexts.push(parsed);
         }
       } catch {
-        // Not JSON — skip (free-text comment)
+        // INTENTIONALLY SILENT: comments can be free-text (not JSON); skipping
+        // non-JSON comments is the expected behavior when filtering for context entries.
       }
     }
 
@@ -1005,6 +1005,8 @@ module.exports = {
         try {
           parsed = JSON.parse(body);
         } catch {
+          // INTENTIONALLY SILENT: non-JSON comments are skipped when scanning
+          // for structured forge-verifier context entries.
           continue;
         }
 

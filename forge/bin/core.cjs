@@ -169,7 +169,8 @@ function restartDolt() {
     // Migrate to async when the command layer supports it.
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   } catch (_) {
-    // Ignore restart errors; the retry will surface the real failure
+    // INTENTIONALLY SILENT: Restart is best-effort; the subsequent _bdExec retry
+    // will surface the real failure if Dolt is still unreachable.
   }
 }
 
@@ -189,6 +190,14 @@ function _bdExec(argList, opts = {}) {
       return _bdExec(argList, { ...opts, _retry: true });
     }
     if (opts.allowFail) return '';
+    // Surface Dolt connection failures with a specific error code so callers
+    // can distinguish infrastructure issues from logical command errors.
+    if (isDoltConnectionError(err)) {
+      const connErr = new Error(`BD_CONNECTION_ERROR: ${err.message}`);
+      connErr.code = 'BD_CONNECTION_ERROR';
+      connErr.suggestion = 'Dolt is not running or refused the connection. Start it with: bd dolt start';
+      throw connErr;
+    }
     throw err;
   }
 }
@@ -228,6 +237,9 @@ function bdJson(args) {
     }
     return parsed;
   } catch {
+    // INTENTIONALLY SOFT FAILURE: bd sometimes returns non-JSON output (e.g. error
+    // messages, empty results). Callers check for null and handle accordingly.
+    // Logged to stderr for debugging but not fatal.
     const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
     console.error('[bdJson] Parse failure for:', args, 'raw:', truncated);
     return null;
@@ -248,6 +260,7 @@ function bdJsonArgs(argList) {
     }
     return parsed;
   } catch {
+    // INTENTIONALLY SOFT FAILURE: same rationale as bdJson -- callers check for null.
     const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
     console.error('[bdJsonArgs] Parse failure for:', argList.join(' '), 'raw:', truncated);
     return null;
@@ -326,7 +339,8 @@ function findGitRoot(from) {
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch (err) {
-    // status 128 means not a git repo — expected; other errors are surprising
+    // INTENTIONALLY SILENT for status 128 (not a git repo -- expected outside repos).
+    // Other statuses are logged as warnings since they indicate unexpected failures.
     if (err.status !== 128) {
       console.warn(`[findGitRoot] unexpected git error (status ${err.status}) for path "${key}"`);
     }
@@ -398,7 +412,7 @@ function resolveSettings(cwd) {
   let rootSettings = {};
   try {
     rootSettings = parseSimpleYaml(fs.readFileSync(rootSettingsPath, 'utf8'));
-  } catch { /* no root settings */ }
+  } catch { /* INTENTIONALLY SILENT: settings file is optional; defaults suffice */ }
   deepMerge(settings, rootSettings);
 
   // Layer 2: app-level settings (only if cwd differs from git root)
@@ -407,7 +421,7 @@ function resolveSettings(cwd) {
     try {
       const appSettings = parseSimpleYaml(fs.readFileSync(appSettingsPath, 'utf8'));
       deepMerge(settings, appSettings);
-    } catch { /* unreadable app settings */ }
+    } catch { /* INTENTIONALLY SILENT: app-level settings are optional; root settings suffice */ }
   }
 
   _settingsCache.set(cacheKey, settings);
@@ -432,14 +446,14 @@ function loadModelProfile() {
     const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
     const parsed = parseFrontmatter(text);
     if (parsed.model_profile) profile = parsed.model_profile;
-  } catch { /* no global settings */ }
+  } catch { /* INTENTIONALLY SILENT: global settings file is optional */ }
 
   // Project layer (overrides global)
   try {
     const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
     const parsed = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
     if (parsed.model_profile) profile = parsed.model_profile;
-  } catch { /* no project settings */ }
+  } catch { /* INTENTIONALLY SILENT: project settings file is optional */ }
 
   // Validate
   if (profile && !['quality', 'balanced', 'budget'].includes(profile)) {
@@ -466,7 +480,7 @@ function loadModelOverrides() {
     if (parsed.model_overrides && typeof parsed.model_overrides === 'object') {
       overrides = { ...parsed.model_overrides };
     }
-  } catch { /* no global settings */ }
+  } catch { /* INTENTIONALLY SILENT: global settings file is optional */ }
 
   // Project layer (overrides global per-key)
   try {
@@ -475,7 +489,7 @@ function loadModelOverrides() {
     if (parsed.model_overrides && typeof parsed.model_overrides === 'object') {
       overrides = { ...overrides, ...parsed.model_overrides };
     }
-  } catch { /* no project settings */ }
+  } catch { /* INTENTIONALLY SILENT: project settings file is optional */ }
 
   _modelOverridesCache = overrides;
   return _modelOverridesCache;
