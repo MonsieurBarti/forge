@@ -13,7 +13,7 @@ PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
 ```
 Extract the project ID, then:
 ```bash
-CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>)
+CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>)
 ```
 Match the phase number to the ordered list of phases.
 
@@ -40,7 +40,7 @@ bd children <phase-id> --json | jq '[.[] | select(.labels | contains(["forge:res
 Load the project and phase context:
 ```bash
 PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
-CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>)
+CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>)
 PHASE=$(bd show <phase-id> --json)
 ```
 
