@@ -14,7 +14,7 @@ If no argument provided, find the most recently closed phase:
 ```bash
 PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
 # Extract project ID from result
-CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>)
+CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>)
 ```
 
 Match the phase number to the ordered phases list from project context.

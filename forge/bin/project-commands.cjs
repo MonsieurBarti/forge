@@ -3,7 +3,7 @@
 /**
  * project-commands.cjs -- Project, settings, model, config, debug, todo, and milestone commands.
  *
- * Commands: find-project, progress, project-context, full-progress, generate-dashboard,
+ * Commands: find-project, progress, project-context, project-context-slim, full-progress, generate-dashboard,
  *           save-session, load-session, settings-load, settings-set, settings-clear,
  *           settings-bulk, resolve-model, model-for-role, model-profiles,
  *           config-get, config-set, config-list, config-clear, health,
@@ -1560,6 +1560,65 @@ module.exports = {
         phases_in_progress: phases.filter(p => p.status === 'in_progress').length,
       },
     });
+  },
+
+  /**
+   * Get slim project context for phase resolution.
+   * Returns project bead (id, title, status, description) plus phases and
+   * requirements mapped to {id, title, status, description_first_line}.
+   * Drastically smaller than project-context (~15KB vs ~135KB).
+   */
+  'project-context-slim'(args) {
+    const projectId = args[0];
+    if (!projectId) {
+      forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools project-context-slim <project-bead-id>');
+    }
+    validateId(projectId);
+
+    const project = bdJson(`show ${projectId}`);
+    const { phases, requirements } = collectProjectIssues(projectId);
+
+    // Truncate descriptions to save tokens while keeping enough context for display
+    const DESC_PREVIEW_CHARS = 80;
+    const firstLine = (desc) => {
+      if (!desc) return '';
+      const line = desc.split('\n')[0].trim();
+      if (line.length <= DESC_PREVIEW_CHARS) return line;
+      return line.slice(0, DESC_PREVIEW_CHARS - 3) + '...';
+    };
+
+    const slim = (item) => ({
+      id: item.id,
+      title: item.title,
+      status: item.status,
+      description_first_line: firstLine(item.description),
+    });
+
+    // Compact output: top-level structure readable, array items as single-line
+    // JSON to keep total payload small.
+    const projectSlim = {
+      id: project?.id,
+      title: project?.title,
+      status: project?.status,
+      description: project?.description,
+    };
+    const reqSlim = requirements.map(slim);
+    const phaseSlim = phases.map(slim);
+    let closed = 0, inProgress = 0;
+    for (const p of phases) {
+      if (p.status === 'closed') closed++;
+      else if (p.status === 'in_progress') inProgress++;
+    }
+    const summary = {
+      total_requirements: requirements.length,
+      total_phases: phases.length,
+      phases_complete: closed,
+      phases_in_progress: inProgress,
+    };
+    // Intentionally compact (not pretty-printed) to minimise token payload — do not switch to output()
+    const line = (o) => JSON.stringify(o);
+    const out = `{"project":${line(projectSlim)},"requirements":[${reqSlim.map(line).join(',')}],"phases":[${phaseSlim.map(line).join(',')}],"summary":${line(summary)}}`;
+    process.stdout.write(out + '\n');
   },
 
   /**

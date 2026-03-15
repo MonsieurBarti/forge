@@ -30,7 +30,7 @@ PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
 
 Extract the project ID, then:
 ```bash
-CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>)
+CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>)
 ```
 
 Match the phase number to the ordered list of phases. If a phase ID was given directly, use it.
@@ -61,7 +61,7 @@ Extract from project bead:
 
 **Step 2: Read prior phase context**
 
-From the project-context output, for each phase before the current one:
+From the project-context-slim output, for each phase before the current one use `bd show <phase-id> --json` to get full details:
 - Read the `notes` field -- these are locked preferences and decisions
 - Note any patterns (e.g., "user consistently prefers minimal UI")
 

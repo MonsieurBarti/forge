@@ -20,7 +20,7 @@ Extract the project ID.
 ## 2. Load Project Context
 
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>
+node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>
 ```
 
 From the result, extract:

@@ -11,16 +11,14 @@ If a phase number was given (e.g., "2"), find the exact matching phase bead:
 ```bash
 PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
 ```
-Extract the project ID, then use `resolve-phase` to do an **exact** numeric match
-against `forge:phase`-labeled epics only (prevents phase 7 from matching phase 17):
+Extract the project ID, then use `resolve-phase` for an **exact** numeric match
+against `forge:phase`-labeled epics only:
 ```bash
 PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-phase <project-id> <phase-number>)
 ```
-Parse `phase.id` from the result. If `found` is false, report the available phases and stop.
+Parse `phase.id` from the result. If `found` is false, report available phases and stop.
 
-If a phase ID was given directly, use it.
-
-If nothing was given, find the first unplanned phase (open, no children).
+If a phase ID was given directly, use it. If nothing was given, find the first unplanned phase (open, no children).
 
 ## 2. Check Prerequisites
 
@@ -36,39 +34,27 @@ If blocked, show what's blocking and suggest working on that first.
 
 ## 2.5. Detect Parent Milestone and Fetch Requirements
 
-Check if the phase belongs to a milestone by looking for a parent-child dependency pointing
-up to a milestone-labeled bead:
+Check if the phase belongs to a milestone:
 
 ```bash
 bd dep list <phase-id> --direction=up --type=parent-child --json
 ```
 
-Inspect the results for any parent bead that has the `forge:milestone` label. To confirm,
-check each parent candidate:
-
+Inspect results for any parent bead with `forge:milestone` label:
 ```bash
 bd show <parent-id> --json
 ```
 
 If a milestone is found, fetch its requirement beads:
-
 ```bash
 bd dep list <milestone-id> --direction=up --type=parent-child --json
 ```
 
-Filter this list for beads that have the `forge:req` label. For each req bead, note its
-`id` and `title` (and `description` if present). Store the full list as
-`MILESTONE_REQS` — a list of objects with `id`, `title`, and `description`.
-
-If no milestone is found, set `MILESTONE_REQS` to empty and continue — the workflow
-behaves unchanged.
+Filter for beads with `forge:req` label. Store as `MILESTONE_REQS` (list of id, title, description). If no milestone found, set `MILESTONE_REQS` to empty.
 
 ## 3. Research
 
-Skip this step and go to step 4 if any of the following is true:
-- The `--skip-research` flag was passed by the user.
-- `forge.auto_research` is `false`:
-
+Skip this step if `--skip-research` was passed or `forge.auto_research` is `false`:
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" config-get auto_research
 ```
@@ -78,37 +64,29 @@ Resolve the model for the researcher agent:
 MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-researcher --raw)
 ```
 
-Before spawning the researcher, query for retrospective data from past phases:
+Query retrospective data from past phases:
 ```bash
 RETRO=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" retro-query <project-id>)
 ```
 
-Parse the JSON result. If the command fails or `phase_count` is 0, set `RETRO_SECTION` to
-empty string. Otherwise, build `RETRO_SECTION` from the actual output fields:
+Parse JSON. If the command fails or `phase_count` is 0, set `RETRO_SECTION` to empty. Otherwise build `RETRO_SECTION`:
 
 ```
 Retrospective data from <phase_count> past phase(s):
 
 Lessons learned:
-<for each entry in lessons array>
 - [<phase_title>] <lesson>
-</for each>
 
-⚠ Pitfall warnings:
-<for each entry in pitfall_flags array>
+Pitfall warnings:
 - [<phase_title>] <pitfall>
-</for each>
 
 Effectiveness summary:
-<for each phase_id, rating in effectiveness_ratings>
-- <phase_title>: rated <rating>/5 — <findings> (<blockers> blocker(s))
-</for each>
+- <phase_title>: rated <rating>/5 -- <findings> (<blockers> blocker(s))
 ```
 
-Omit any sub-section whose source array/object is empty. If all are empty, set
-`RETRO_SECTION` to empty string.
+Omit any sub-section whose source is empty. If all empty, set `RETRO_SECTION` to empty.
 
-Otherwise, spawn a **forge-researcher** agent to investigate the implementation approach:
+Spawn a **forge-researcher** agent:
 
 ```
 Agent(subagent_type="forge-researcher", model="<resolved model or omit if null>", prompt="
@@ -138,132 +116,83 @@ node \"$HOME/.claude/forge/bin/forge-tools.cjs\" context-write <phase-id> '{
     \"Common pitfalls: <mistakes and gotchas to avoid>\"
   ],
   \"decisions\": [
-    \"Complexity estimate: <simple|medium|complex> — <reasoning>\"
+    \"Complexity estimate: <simple|medium|complex> -- <reasoning>\"
   ]
 }'
 ")
 ```
 
-After the researcher returns, read back the structured context to extract findings for the planner:
-
+Read back structured context:
 ```bash
 RESEARCH_CTX=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" context-read <phase-id>)
 ```
 
-Parse the JSON output: look for the latest entry with `agent == "forge-researcher"` and `status == "completed"`. Extract:
-- `findings` array → join as bullet list for `Research findings`
-- `decisions` array → join as bullet list (includes complexity estimate)
+Parse JSON: find latest entry with `agent == "forge-researcher"` and `status == "completed"`. Extract `findings` and `decisions` arrays as bullet lists.
 
-**Backward compatibility:** If `context-read` returns no structured entries (only free-text research comments exist), fall back to reading phase comments directly:
+**Backward compatibility:** If `context-read` returns no structured entries, fall back to:
 ```bash
 bd comments <phase-id>
 ```
-Use the most recent comment text as the research findings. The planner prompt always receives a research findings string — either from structured JSON or from the free-text fallback.
+Use most recent comment text as research findings.
 
 ## 4. Context Check and Approach Discussion
-
-Check whether the phase already has context notes:
 
 ```bash
 bd show <phase-id> --json
 ```
 
-Inspect the `notes` field.
+**If notes exist:** Skip inline discuss, proceed to step 5. Acknowledge: "Phase notes found -- proceeding with existing context."
 
-**If notes already exist:** Skip the inline discuss and proceed directly to step 5. The
-existing notes contain sufficient context for planning. Briefly acknowledge what context is
-present (e.g., "Phase notes found -- proceeding with existing context.").
-
-**If notes are empty or absent:** Run the following condensed inline discuss before
-proceeding to step 5.
-
----
+**If notes are empty:** Run condensed inline discuss:
 
 ### Inline Discuss (runs only when no prior notes exist)
 
-The goal is to capture a goal statement and key decisions so downstream planning is
-grounded. This is intentionally lightweight -- not the full discuss-phase workflow.
-
 **Step A: Scout codebase quickly**
-
-Check whether relevant code exists to inform options:
 ```bash
 ls src/ app/ lib/ 2>/dev/null | head -20
 ```
-
-Read 1-2 of the most relevant existing files if they exist.
+Read 1-2 most relevant existing files if they exist.
 
 **Step B: Identify 2-3 specific gray areas**
 
-From the phase description and any codebase context, identify the 2-3 implementation
-decisions that most affect what gets built. Think: what would change the outcome if decided
-differently? These must be **phase-specific and concrete** — not generic category labels.
+From the phase description and codebase context, identify the 2-3 decisions that most affect what gets built. Must be **phase-specific and concrete** -- not generic labels.
 
-Domain-driven examples:
-- "User authentication" -> "Session handling: cookie vs JWT?" / "Error responses: redirect or inline?" / "Recovery: email link or SMS?"
-- "CLI for backups" -> "Output format: JSON, table, or plain text?" / "Progress: spinner, percentage, or silent?" / "On error: abort-all or skip-and-continue?"
-- "Feed display" -> "Layout: cards vs list?" / "Empty state: illustration or text-only?" / "Load more: pagination or infinite scroll?"
-
-**Do NOT use generic labels** like "UI", "UX", "Behavior", or "Performance". Each gray area must be a specific decision with concrete option tradeoffs.
+Examples:
+- "User authentication" -> "Session handling: cookie vs JWT?" / "Recovery: email link or SMS?"
+- "CLI for backups" -> "Output format: JSON, table, or plain text?" / "On error: abort-all or skip-and-continue?"
 
 **Step C: Present and discuss with user**
 
-State the phase goal and frame the discussion:
-```
-Phase [X]: [Name]
-Goal: [What this phase delivers]
-
-Before I plan the tasks, I need a few concrete decisions.
-```
-
-Use AskUserQuestion (multiSelect: true) to let the user pick which areas to clarify:
+State the phase goal, then use AskUserQuestion (multiSelect: true):
 - header: "Quick decisions"
 - question: "Which of these need your input for [phase name]?"
-- options: the 2-3 specific gray areas from Step B, each phrased as a concrete question
-  (e.g., "Session handling: cookie vs JWT?" not "Session handling")
+- options: the 2-3 specific gray areas phrased as concrete questions
 
-For each selected area, ask 1-2 focused follow-up questions using AskUserQuestion:
-- header: "[Area]" (max 12 chars, abbreviate if needed)
-- question: The specific decision to make
-- options: 2-3 **concrete, named choices** — not abstract options. Annotate with codebase
-  context if relevant (e.g., "Cards (reuses existing Card component)" vs "List (new pattern)").
-  Include "You decide" when the choice is low-stakes.
-
-Keep total questions to 4-6 across all areas. This is a focused alignment pass, not a full
-discussion session. The goal is zero ambiguity entering execute — every task the planner
-creates should be unambiguous given the notes produced here.
+For each selected area, ask 1-2 focused follow-ups with concrete, named choices. Include "You decide" for low-stakes choices. Keep total questions to 4-6.
 
 **Step D: Store results as phase notes**
-
-After the brief discussion, write structured notes to the phase bead:
-
 ```bash
 bd update <phase-id> --notes="## Goal
 
-[One sentence: what this phase delivers and why it matters]
+[One sentence: what this phase delivers and why]
 
 ## Key Decisions
 
 - [Area]: [Decision captured]
-- [Area]: [Decision captured]
 
 ## Claude's Discretion
 
-[Areas where user said 'you decide' or no strong preference expressed]"
+[Areas where user said 'you decide']"
 ```
-
----
-
-Continue to step 5 (Create Task Beads) with the notes now populated.
 
 ## 5. Create Task Beads
 
-Resolve the model for the planner agent:
+Resolve the model:
 ```bash
 MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-planner --raw)
 ```
 
-Spawn a **forge-planner** agent to break the phase into tasks:
+Spawn a **forge-planner** agent:
 
 ```
 Agent(subagent_type="forge-planner", model="<resolved model or omit if null>", prompt="
@@ -272,36 +201,34 @@ Break this phase into 2-5 concrete tasks:
 Phase: <phase title> (<phase-id>)
 Goal: <phase description>
 Project: <project-id>
-Research findings: <findings from step 3 — bullet list from structured JSON or free-text fallback; omit section if no research was done>
-Complexity estimate: <from structured context decisions field if available>
+Research findings: <findings from step 3; omit if no research>
+Complexity estimate: <from structured context if available>
 User decisions: <approach decisions from step 4>
-Retrospective insights: <if RETRO_SECTION from step 3 is non-empty, include lessons and pitfall flags here; otherwise omit this line>
+Retrospective insights: <if RETRO_SECTION non-empty; otherwise omit>
 Requirements addressed by this phase: <relevant requirement IDs and titles>
 
-<if MILESTONE_REQS is non-empty, include this section — otherwise omit it entirely>
-Milestone Requirements (forge:req beads that this phase must help satisfy):
+<if MILESTONE_REQS is non-empty>
+Milestone Requirements (forge:req beads this phase must help satisfy):
 <for each req in MILESTONE_REQS:>
-- <req-id>: <req-title> — <req-description if present>
+- <req-id>: <req-title> -- <req-description if present>
 
 When creating tasks, wire validates dependencies for applicable requirements:
   bd dep add <task-id> <req-id> --type=validates
-Do this for every task that directly implements or verifies a requirement above.
+Do this for every task that directly implements or verifies a requirement.
 A single task may validate multiple requirements; a requirement may be validated by multiple
-tasks. When in doubt, prefer to add the link — missing coverage is harder to fix than extra
-coverage.
+tasks. When in doubt, prefer to add the link.
 </end milestone section>
 
 For each task:
 1. Create the task bead with acceptance_criteria
 2. Add parent-child dep to the phase
 3. Add forge:task label
-4. Add validates dep to requirements it fulfills (see milestone requirements above if present)
-5. Add intra-phase dependencies ONLY when strictly necessary — when task B cannot start until it has the concrete output produced by task A (e.g. task B uses a file, API, or data structure that task A creates). Independent tasks that merely belong to the same phase should have NO inter-task dependency. When in doubt, leave tasks independent.
+4. Add validates dep to requirements it fulfills
+5. Add intra-phase dependencies ONLY when strictly necessary -- when task B cannot start until it has the concrete output produced by task A. Independent tasks should have NO inter-task dependency.
 ")
 ```
 
-If you prefer to create tasks directly (small phase, clear scope), do so manually:
-
+If creating tasks directly (small phase, clear scope):
 ```bash
 bd create --title="<task title>" \
   --description="<what to implement>" \
@@ -309,34 +236,27 @@ bd create --title="<task title>" \
   --type=task --priority=2 --json
 bd dep add <task-id> <phase-id> --type=parent-child
 bd label add <task-id> forge:task
-```
-
-Link tasks to requirements they fulfill:
-```bash
 bd dep add <task-id> <req-id> --type=validates
 ```
 
-Add intra-phase dependencies ONLY when strictly necessary — when task B cannot start until it
-has the concrete output produced by task A (e.g. task B uses a file, API, or data structure
-that task A creates). Independent tasks that merely belong to the same phase should have NO
-inter-task dependency. When in doubt, leave tasks independent.
+Add intra-phase dependencies ONLY when task B truly needs task A's output:
 ```bash
-bd dep add <task-b-id> <task-a-id>  # task B depends on A — only add when B truly needs A's output
+bd dep add <task-b-id> <task-a-id>
 ```
 
 ## 6. Verify Plan (Plan Verification Loop)
 
-Run automated checks first:
+Run automated checks:
 ```bash
 CHECK=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" plan-check <phase-id>)
 ```
 
-Resolve the model for the plan-checker agent:
+Resolve the model:
 ```bash
 MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-plan-checker --raw)
 ```
 
-Then spawn a **forge-plan-checker** agent for thorough validation:
+Spawn a **forge-plan-checker** agent:
 
 ```
 Agent(subagent_type="forge-plan-checker", model="<resolved model or omit if null>", prompt="
@@ -353,40 +273,35 @@ Check:
 5. All tasks have forge:task label
 
 Run: node $HOME/.claude/forge/bin/forge-tools.cjs plan-check <phase-id>
-for automated coverage data.
 
 Produce an APPROVED or NEEDS REVISION verdict as structured JSON:
 {
-  "verdict": "APPROVED" | "NEEDS REVISION",
-  "findings": [
-    { "number": 1, "severity": "blocker"|"suggestion", "description": "...", "fix": "exact command or action" }
+  \"verdict\": \"APPROVED\" | \"NEEDS REVISION\",
+  \"findings\": [
+    { \"number\": 1, \"severity\": \"blocker\"|\"suggestion\", \"description\": \"...\", \"fix\": \"exact command or action\" }
   ]
 }
-NEEDS REVISION MUST include at least one finding with severity=blocker.
-APPROVED may only contain findings with severity=suggestion.
+NEEDS REVISION MUST include at least one blocker finding.
+APPROVED may only contain suggestion findings.
 ")
 ```
 
-**If NEEDS REVISION:** Fix each blocker finding using its `fix` command, then re-run the
-plan-checker. Repeat until APPROVED.
+**If NEEDS REVISION:** Fix each blocker using its `fix` command, then re-run checker. Repeat until APPROVED.
 
-**If APPROVED:** Present the verified plan to the user:
+**If APPROVED:** Present verified plan:
 ```bash
 PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 ```
 
-Show: tasks, their acceptance criteria, requirement links, and execution order (waves).
+Show tasks, acceptance criteria, requirement links, and execution order (waves).
 
 ## 6.5. Display Cost Estimate
-
-After plan verification, show the estimated cost for executing this phase:
 
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-estimate <phase-id>
 ```
 
-Display the result to the user so they know the expected token/cost budget before execution.
-This is best-effort — if the command fails (e.g., no historical data), skip silently.
+Display to user. Best-effort -- if command fails, skip silently.
 
 ## 7. Mark Phase as Planned
 
@@ -394,44 +309,25 @@ This is best-effort — if the command fails (e.g., no historical data), skip si
 bd update <phase-id> --status=in_progress
 ```
 
-Create a dedicated branch for this phase. The branch is created from current HEAD in the
-milestone worktree (if one exists) or the main repo:
-
+Create a dedicated branch:
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-create <phase-id>
 ```
 
-This creates the branch `forge/m<milestone-id>/phase-<phase-id>`. If the branch already
-exists (e.g., re-running plan on a phase), the command is idempotent — it will report the
-existing branch and check it out without error. If no milestone parent exists, a branch
-named `forge/phase-<phase-id>` is created instead.
+Creates `forge/m<milestone-id>/phase-<phase-id>`. If branch exists, command is idempotent. Without a milestone parent, creates `forge/phase-<phase-id>`.
 
 ## 8. Cost Estimate
-
-After planning completes, fetch the estimated cost for the phase:
 
 ```bash
 COST_EST=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-estimate <phase-id>)
 ```
 
-Parse the JSON result. If `estimated_cost_usd` is not null, display:
-
-```
-Estimated phase cost: $<estimated_cost_usd> (<confidence> confidence, based on <historical_phases_used> phase(s))
-```
-
-If `estimated_cost_usd` is null (no historical data), display:
-
-```
-Cost estimate: not available (no completed phases with cost data yet)
-```
-
-If `task_count` is 0, display:
-
-```
-Cost estimate: $0.00 (no tasks in phase)
-```
+Parse JSON. Display based on result:
+- If `estimated_cost_usd` is not null: `Estimated phase cost: $<cost> (<confidence> confidence, based on <N> phase(s))`
+- If null: `Cost estimate: not available (no completed phases with cost data yet)`
+- If `task_count` is 0: `Cost estimate: $0.00 (no tasks in phase)`
 
 Suggest next step: `/forge:execute <phase-number>` or `/forge:plan <next-phase>`.
 
 </process>
+</output>
