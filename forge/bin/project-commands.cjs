@@ -1816,7 +1816,10 @@ module.exports = {
     }
     validateId(projectId);
 
-    const project = bdJson(`show ${projectId}`);
+    let project;
+    try {
+      project = bdJson(`show ${projectId}`);
+    } catch { /* INTENTIONALLY SILENT — bd show exits non-zero for missing IDs; handled below */ }
     if (!project) {
       forgeError('NOT_FOUND', `Project not found: ${projectId}`, 'Verify the project ID with: forge-tools find-project, or run /forge:new to create a new project', { project_id: projectId });
     }
