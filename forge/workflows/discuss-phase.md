@@ -1,39 +1,24 @@
 <purpose>
 Extract implementation decisions that downstream agents need. Analyze the phase to identify gray areas, let the user choose what to discuss, then deep-dive each selected area until satisfied.
 
-You are a thinking partner, not an interviewer. The user is the visionary -- you are the builder. Your job is to capture decisions that will guide research and planning, not to figure out implementation yourself.
+You are a thinking partner, not an interviewer. The user is the visionary -- you are the builder. Capture decisions that will guide research and planning, not figure out implementation yourself.
 </purpose>
 
 <downstream_awareness>
 **Phase context feeds into:**
 
 1. **forge-researcher** -- Reads phase notes to know WHAT to research
-   - "User wants card-based layout" -> researcher investigates card component patterns
-   - "Infinite scroll decided" -> researcher looks into virtualization libraries
-
 2. **forge-planner** -- Reads phase notes to know WHAT decisions are locked
-   - "Pull-to-refresh on mobile" -> planner includes that in task specs
-   - "Claude's Discretion: loading skeleton" -> planner can decide approach
 
-**Your job:** Capture decisions clearly enough that downstream agents can act on them without asking the user again.
-
-**Not your job:** Figure out HOW to implement. That's what research and planning do with the decisions you capture.
+Capture decisions clearly enough that downstream agents can act on them without asking the user again. Do NOT figure out HOW to implement -- that's what research and planning do.
 </downstream_awareness>
 
 <philosophy>
 **User = founder/visionary. Claude = builder.**
 
-The user knows:
-- How they imagine it working
-- What it should look/feel like
-- What's essential vs nice-to-have
-- Specific behaviors or references they have in mind
+The user knows: how they imagine it working, what it should look/feel like, what's essential vs nice-to-have, specific behaviors or references.
 
-The user doesn't know (and shouldn't be asked):
-- Codebase patterns (researcher reads the code)
-- Technical risks (researcher identifies these)
-- Implementation approach (planner figures this out)
-- Success metrics (inferred from the work)
+The user doesn't know (don't ask): codebase patterns, technical risks, implementation approach, success metrics.
 
 Ask about vision and implementation choices. Capture decisions for downstream agents.
 </philosophy>
@@ -43,17 +28,11 @@ Ask about vision and implementation choices. Capture decisions for downstream ag
 
 The phase boundary comes from the project roadmap and is FIXED. Discussion clarifies HOW to implement what's scoped, never WHETHER to add new capabilities.
 
-**Allowed (clarifying ambiguity):**
-- "How should posts be displayed?" (layout, density, info shown)
-- "What happens on empty state?" (within the feature)
-- "Pull to refresh or manual?" (behavior choice)
+**Allowed:** "How should posts be displayed?" / "What happens on empty state?" / "Pull to refresh or manual?"
 
-**Not allowed (scope creep):**
-- "Should we also add comments?" (new capability)
-- "What about search/filtering?" (new capability)
-- "Maybe include bookmarking?" (new capability)
+**Not allowed:** "Should we also add comments?" / "What about search/filtering?" (new capabilities)
 
-**The heuristic:** Does this clarify how we implement what's already in the phase, or does it add a new capability that could be its own phase?
+**Heuristic:** Does this clarify how we implement what's in the phase, or add a new capability that could be its own phase?
 
 **When user suggests scope creep:**
 ```
@@ -63,46 +42,31 @@ Want me to note it for the roadmap backlog?
 For now, let's focus on [phase domain]."
 ```
 
-Capture the idea in a "Deferred Ideas" section. Don't lose it, don't act on it.
+Capture deferred ideas in a "Deferred Ideas" section.
 </scope_guardrail>
 
 <gray_area_identification>
 Gray areas are **implementation decisions the user cares about** -- things that could go multiple ways and would change the result.
 
-**How to identify gray areas:**
+**How to identify:**
 
-1. **Read the phase goal** from the phase bead description
-2. **Understand the domain** -- What kind of thing is being built?
-   - Something users SEE -> visual presentation, interactions, states matter
-   - Something users CALL -> interface contracts, responses, errors matter
-   - Something users RUN -> invocation, output, behavior modes matter
-   - Something users READ -> structure, tone, depth, flow matter
-   - Something being ORGANIZED -> criteria, grouping, handling exceptions matter
-3. **Generate phase-specific gray areas** -- Not generic categories, but concrete decisions for THIS phase
-
-**Don't use generic category labels** (UI, UX, Behavior). Generate specific gray areas:
+1. Read the phase goal from the phase bead description
+2. Understand the domain:
+   - Something users SEE -> visual presentation, interactions, states
+   - Something users CALL -> interface contracts, responses, errors
+   - Something users RUN -> invocation, output, behavior modes
+   - Something users READ -> structure, tone, depth, flow
+   - Something being ORGANIZED -> criteria, grouping, handling exceptions
+3. Generate phase-specific gray areas -- concrete decisions for THIS phase, not generic categories
 
 ```
-Phase: "User authentication"
--> Session handling, Error responses, Multi-device policy, Recovery flow
-
-Phase: "Organize photo library"
--> Grouping criteria, Duplicate handling, Naming convention, Folder structure
-
-Phase: "CLI for database backups"
--> Output format, Flag design, Progress reporting, Error recovery
-
-Phase: "API documentation"
--> Structure/navigation, Code examples depth, Versioning approach, Interactive elements
+Phase: "User authentication" -> Session handling, Error responses, Multi-device policy, Recovery flow
+Phase: "CLI for database backups" -> Output format, Flag design, Progress reporting, Error recovery
 ```
 
-**The key question:** What decisions would change the outcome that the user should weigh in on?
+**Key question:** What decisions would change the outcome that the user should weigh in on?
 
-**Claude handles these (don't ask):**
-- Technical implementation details
-- Architecture patterns
-- Performance optimization
-- Scope (roadmap defines this)
+**Claude handles (don't ask):** Technical implementation, architecture, performance, scope.
 </gray_area_identification>
 
 <process>
@@ -116,7 +80,7 @@ PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
 
 Extract the project ID, then:
 ```bash
-CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>)
+CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>)
 ```
 
 Match the phase number to the ordered list of phases. If a phase ID was given directly, use it.
@@ -143,10 +107,7 @@ Check the `notes` field. **If notes exist and contain structured context:**
 Use AskUserQuestion:
 - header: "Context"
 - question: "Phase [X] already has context notes. What do you want to do?"
-- options:
-  - "Update it" -- Review and revise existing context
-  - "View it" -- Show me what's there
-  - "Skip" -- Use existing context as-is
+- options: "Update it" / "View it" / "Skip"
 
 If "Update": Load existing, continue to analyze_phase
 If "View": Display notes, then offer update/skip
@@ -163,10 +124,7 @@ bd children <phase-id> --json
 Use AskUserQuestion:
 - header: "Plans exist"
 - question: "Phase [X] already has tasks created without user context. Your decisions here won't affect existing tasks unless you replan."
-- options:
-  - "Continue and replan after" -- Capture context, then run /forge:plan to replan
-  - "View existing tasks" -- Show tasks before deciding
-  - "Cancel" -- Skip discuss-phase
+- options: "Continue and replan after" / "View existing tasks" / "Cancel"
 
 If "Continue and replan after": Continue to load_prior_context.
 If "View existing tasks": Display tasks, then offer "Continue" / "Cancel".
@@ -188,105 +146,67 @@ Parse JSON for the project bead ID, then:
 bd show <project-id> --json
 ```
 
-Extract from project bead:
-- **description** -- Vision, principles, non-negotiables
-- **design** -- Scope/constraints
-- **notes** -- Any approach decisions
+Extract: description (vision, principles), design (scope/constraints), notes (approach decisions).
 
 **Step 2: Read all prior phase notes**
 ```bash
 CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>)
 ```
 
-This returns all phases with their details. For each phase before the current one:
-- Read the `notes` field -- these are locked preferences and decisions
-- Note any patterns (e.g., "user consistently prefers minimal UI")
+For each phase before the current one, read the `notes` field for locked preferences and decisions.
 
 **Step 3: Build internal prior_decisions context**
 
-Structure the extracted information:
 ```
 ## Project-Level
 - [Key principle or constraint from project bead]
-- [Requirement that affects this phase]
 
 ## From Prior Phases
 ### Phase N: [Name]
 - [Decision that may be relevant to current phase]
-- [Preference that establishes a pattern]
 ```
 
 **Usage in subsequent steps:**
-- `analyze_phase`: Skip gray areas already decided in prior phases
-- `present_gray_areas`: Annotate options with prior decisions ("You chose X in Phase N")
-- `discuss_areas`: Pre-fill answers or flag conflicts ("This contradicts Phase N -- same here or different?")
+- `analyze_phase`: Skip gray areas already decided
+- `present_gray_areas`: Annotate options with prior decisions
+- `discuss_areas`: Pre-fill answers or flag conflicts
 
-**If no prior context exists:** Continue without -- this is expected for early phases.
+**If no prior context exists:** Continue without -- expected for early phases.
 </step>
 
 <step name="scout_codebase">
-Lightweight scan of existing code to inform gray area identification and discussion.
+Lightweight scan of existing code to inform gray area identification.
 
-**Step 1: Check for existing codebase structure**
-
-Look at the project's source tree:
 ```bash
 ls src/ app/ lib/ 2>/dev/null
 ```
 
-**Step 2: Targeted grep for phase-relevant code**
-
-Extract key terms from the phase goal (e.g., "feed" -> "post", "card", "list"; "auth" -> "login", "session", "token").
-
+Extract key terms from the phase goal and search for related files:
 ```bash
-# Find files related to phase goal terms
 grep -rl "{term1}\|{term2}" src/ app/ --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" 2>/dev/null | head -10
-
-# Find existing components/hooks
-ls src/components/ 2>/dev/null
-ls src/hooks/ 2>/dev/null
-ls src/lib/ src/utils/ 2>/dev/null
+ls src/components/ src/hooks/ src/lib/ src/utils/ 2>/dev/null
 ```
 
 Read the 3-5 most relevant files to understand existing patterns.
 
-**Step 3: Build internal codebase_context**
-
-From the scan, identify:
-- **Reusable assets** -- existing components, hooks, utilities that could be used
-- **Established patterns** -- how the codebase does state management, styling, data fetching
-- **Integration points** -- where new code would connect (routes, nav, providers)
-- **Creative options** -- approaches the existing architecture enables or constrains
-
-Store as internal codebase_context for use in analyze_phase and present_gray_areas. This is NOT persisted -- it's used within this session only.
+Build internal codebase_context identifying: reusable assets, established patterns, integration points, creative options the architecture enables or constrains. This is NOT persisted -- session only.
 </step>
 
 <step name="analyze_phase">
-Analyze the phase to identify gray areas worth discussing. **Use both prior_decisions and codebase_context to ground the analysis.**
+Analyze the phase using both prior_decisions and codebase_context.
 
-**Read the phase description and determine:**
-
-1. **Domain boundary** -- What capability is this phase delivering? State it clearly.
-
-2. **Check prior decisions** -- Before generating gray areas, check if any were already decided:
-   - Scan prior_decisions for relevant choices
-   - These are **pre-answered** -- don't re-ask unless this phase has conflicting needs
-   - Note applicable prior decisions for use in presentation
-
-3. **Gray areas by category** -- For each relevant category, identify 1-2 specific ambiguities that would change implementation. **Annotate with code context where relevant** (e.g., "You already have a Card component" or "No existing pattern for this").
-
-4. **Skip assessment** -- If no meaningful gray areas exist (pure infrastructure, clear-cut implementation, or all already decided in prior phases), the phase may not need discussion.
-
-**Output your analysis internally, then present to user.**
+1. **Domain boundary** -- What capability is this phase delivering?
+2. **Check prior decisions** -- Skip gray areas already decided in prior phases
+3. **Gray areas by category** -- For each relevant category, identify 1-2 specific ambiguities. Annotate with code context where relevant.
+4. **Skip assessment** -- If no meaningful gray areas exist (pure infrastructure, clear-cut, or all decided), the phase may not need discussion.
 </step>
 
 <step name="present_gray_areas">
-Present the domain boundary, prior decisions, and gray areas to user.
+State the boundary and any prior decisions, then present gray areas.
 
-**First, state the boundary and any prior decisions that apply:**
 ```
 Phase [X]: [Name]
-Domain: [What this phase delivers -- from your analysis]
+Domain: [What this phase delivers]
 
 We'll clarify HOW to implement this.
 (New capabilities belong in other phases.)
@@ -294,31 +214,16 @@ We'll clarify HOW to implement this.
 [If prior decisions apply:]
 **Carrying forward from earlier phases:**
 - [Decision from Phase N that applies here]
-- [Decision from Phase M that applies here]
 ```
 
-**Then use AskUserQuestion (multiSelect: true):**
+Use AskUserQuestion (multiSelect: true):
 - header: "Discuss"
 - question: "Which areas do you want to discuss for [phase name]?"
-- options: Generate 3-4 phase-specific gray areas, each with:
-  - "[Specific area]" (label) -- concrete, not generic
-  - [1-2 questions this covers + code context annotation] (description)
+- options: 3-4 phase-specific gray areas with concrete labels and 1-2 question descriptions
 
-**Prior decision annotations:** When a gray area was already decided in a prior phase, annotate it:
-```
-Exit shortcuts -- How should users quit?
-  (You decided "Ctrl+C only, no single-key shortcuts" in Phase 5 -- revisit or keep?)
-```
-
-**Code context annotations:** When the scout found relevant existing code:
-```
-Layout style -- Cards vs list vs timeline?
-  (You already have a Card component with shadow/rounded variants. Reusing it keeps the app consistent.)
-```
+Annotate with prior decisions ("You decided X in Phase N -- revisit or keep?") and code context ("You already have a Card component with shadow/rounded variants") where applicable.
 
 **Do NOT include a "skip" or "you decide" option.** User ran this command to discuss -- give them real choices.
-
-Continue to discuss_areas with selected areas.
 </step>
 
 <step name="discuss_areas">
@@ -326,71 +231,44 @@ For each selected area, conduct a focused discussion loop.
 
 **Philosophy: 4 questions, then check.**
 
-Ask 4 questions per area before offering to continue or move on. Each answer often reveals the next question.
-
 **For each area:**
 
-1. **Announce the area:**
-   ```
-   Let's talk about [Area].
-   ```
+1. Announce: `Let's talk about [Area].`
 
-2. **Ask 4 questions using AskUserQuestion:**
-   - header: "[Area]" (max 12 chars -- abbreviate if needed)
-   - question: Specific decision for this area
-   - options: 2-3 concrete choices (AskUserQuestion adds "Other" automatically)
-   - **Annotate options with code context** when relevant:
-     ```
-     "How should posts be displayed?"
-     - Cards (reuses existing Card component -- consistent with Messages)
-     - List (simpler, would be a new pattern)
-     - Timeline (needs new Timeline component -- none exists yet)
-     ```
-   - Include "You decide" as an option when reasonable -- captures Claude discretion
-   - **Context7 for library choices:** When a gray area involves library selection or API approach decisions, use context7 tools to fetch current documentation and inform the options. Don't use Context7 for every question -- only when library-specific knowledge improves the options.
-
-3. **After 4 questions, check:**
+2. Ask 4 questions using AskUserQuestion:
    - header: "[Area]" (max 12 chars)
-   - question: "More questions about [area], or move to next?"
-   - options: "More questions" / "Next area"
+   - question: Specific decision
+   - options: 2-3 concrete choices (AskUserQuestion adds "Other" automatically)
+   - Annotate options with code context when relevant
+   - Include "You decide" when reasonable
+   - Use context7 tools only when library-specific knowledge improves options
 
-   If "More questions" -> ask 4 more, then check again
-   If "Next area" -> proceed to next selected area
-   If "Other" (free text) -> interpret intent: continuation phrases map to "More questions"; advancement phrases map to "Next area"
+3. After 4 questions, check:
+   - "More questions about [area], or move to next?"
+   - Options: "More questions" / "Next area"
+   - If "More questions" -> ask 4 more, then check again
+   - If "Other" (free text) -> interpret intent
 
-4. **After all initially-selected areas complete:**
-   - Summarize what was captured from the discussion so far
-   - AskUserQuestion:
-     - header: "Done"
-     - question: "We've discussed [list areas]. Which gray areas remain unclear?"
-     - options: "Explore more gray areas" / "I'm ready for context"
-   - If "Explore more gray areas":
-     - Identify 2-4 additional gray areas based on what was learned
-     - Return to present_gray_areas logic with these new areas
-     - Loop: discuss new areas, then prompt again
+4. After all selected areas complete:
+   - Summarize captured decisions
+   - AskUserQuestion: "We've discussed [list areas]. Which gray areas remain unclear?"
+   - Options: "Explore more gray areas" / "I'm ready for context"
+   - If "Explore more": identify 2-4 additional gray areas, loop back
    - If "I'm ready for context": Proceed to write_context
 
-**Question design:**
-- Options should be concrete, not abstract ("Cards" not "Option A")
-- Each answer should inform the next question
-- If user picks "Other" to provide freeform input, ask your follow-up as plain text -- NOT another AskUserQuestion. Wait for them to type at the normal prompt, then reflect their input back and confirm before resuming AskUserQuestion for the next question.
+**Question design:** Options should be concrete, not abstract. Each answer should inform the next question. If user picks "Other", ask follow-up as plain text, confirm, then resume AskUserQuestion.
 
 **Scope creep handling:**
-If user mentions something outside the phase domain:
 ```
 "[Feature] sounds like a new capability -- that belongs in its own phase.
 I'll note it as a deferred idea.
 
 Back to [current area]: [return to current question]"
 ```
-
-Track deferred ideas internally.
 </step>
 
 <step name="write_context">
 Store structured context on the phase bead.
-
-**Build the context block:**
 
 ```markdown
 # Phase [X]: [Name] - Context
@@ -399,39 +277,30 @@ Store structured context on the phase bead.
 **Status:** Ready for planning
 
 ## Phase Boundary
-
-[Clear statement of what this phase delivers -- the scope anchor]
+[Clear statement of what this phase delivers]
 
 ## Implementation Decisions
-
-### [Category 1 that was discussed]
-- [Decision or preference captured]
-- [Another decision if applicable]
-
-### [Category 2 that was discussed]
-- [Decision or preference captured]
+### [Category 1]
+- [Decision captured]
 
 ### Claude's Discretion
-[Areas where user said "you decide" -- note that Claude has flexibility here]
+[Areas where user said "you decide"]
 
 ## Existing Code Insights
-
 ### Reusable Assets
-- [Component/hook/utility]: [How it could be used in this phase]
+- [Component/hook/utility]: [How it could be used]
 
 ### Established Patterns
 - [Pattern]: [How it constrains/enables this phase]
 
 ### Integration Points
-- [Where new code connects to existing system]
+- [Where new code connects]
 
 ## Specific Ideas
-
-[Any particular references, examples, or "I want it like X" moments from discussion]
+[References, examples, "I want it like X" moments]
 
 ## Deferred Ideas
-
-[Ideas that came up but belong in other phases. Don't lose them.]
+[Ideas that came up but belong in other phases]
 ```
 
 **Store on the phase bead:**
@@ -451,10 +320,6 @@ Present summary and next steps:
 
 ```
 ## Decisions Captured
-
-### [Category]
-- [Key decision]
-
 ### [Category]
 - [Key decision]
 
@@ -463,15 +328,11 @@ Present summary and next steps:
 - [Deferred idea] -- future phase
 
 ---
-
 ## Next Up
-
 **Phase [X]: [Name]** -- [Goal]
-
 `/forge:plan [X]`
 
 ---
-
 **Also available:**
 - Review context: `bd show <phase-id>` (check notes field)
 - Edit context manually: `bd update <phase-id> --notes "..."`
@@ -486,14 +347,14 @@ Present summary and next steps:
 
 <success_criteria>
 - Phase validated against project
-- Prior context loaded from project and phase beads
-- Already-decided questions not re-asked (carried forward from prior phases)
+- Prior context loaded; already-decided questions not re-asked
 - Codebase scouted for reusable assets, patterns, and integration points
-- Gray areas identified through intelligent analysis with code and prior decision annotations
+- Gray areas identified with code and prior decision annotations
 - User selected which areas to discuss
 - Each selected area explored until user satisfied
 - Scope creep redirected to deferred ideas
 - Phase bead notes capture actual decisions, not vague vision
-- Deferred ideas preserved (as beads or noted in context)
+- Deferred ideas preserved
 - User knows next steps
 </success_criteria>
+</output>
