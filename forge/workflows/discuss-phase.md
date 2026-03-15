@@ -136,12 +136,9 @@ If "Cancel": Exit workflow.
 <step name="load_prior_context">
 Read project-level and prior phase context to avoid re-asking decided questions.
 
-**Step 1: Read project bead**
-```bash
-PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
-```
+> Reuse PROJECT and CONTEXT from resolve_phase — do NOT re-call find-project or project-context-slim.
 
-Parse JSON for the project bead ID, then:
+**Step 1: Read project bead**
 ```bash
 bd show <project-id> --json
 ```
@@ -149,11 +146,8 @@ bd show <project-id> --json
 Extract: description (vision, principles), design (scope/constraints), notes (approach decisions).
 
 **Step 2: Read all prior phase notes**
-```bash
-CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>)
-```
 
-For each phase before the current one, read the `notes` field for locked preferences and decisions.
+From the CONTEXT output, for each phase before the current one, read the `notes` field for locked preferences and decisions.
 
 **Step 3: Build internal prior_decisions context**
 
